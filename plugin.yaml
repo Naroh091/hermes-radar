@@ -1,5 +1,5 @@
 name: proactive
-version: 0.1.0
+version: 0.2.0
 description: Proactive Hermes helps Hermes Agent follow up on user goals, recurring tasks, and authorized external signals. It runs bounded informational checks within explicit grants, delivers selective updates through the chosen gateway, and requires authenticated consent before external changes.
 manifest_version: 2
 api_version: 1
@@ -12,6 +12,9 @@ provides_tools:
   - proactive_propose
 provides_hooks:
   - on_session_start
+  - post_llm_call
+  - post_tool_call
+  - subagent_stop
 config_schema:
   enabled: {type: bool, default: false, description: Instalación desactivada por defecto}
   mode: {type: str, default: shadow, description: shadow o active}

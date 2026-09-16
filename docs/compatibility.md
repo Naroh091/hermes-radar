@@ -1,33 +1,54 @@
-# Proactive Hermes — P0 compatibility
-
-## Objetivo
-
-Validar el contrato público de Hermes sin modificar su checkout ni activar cuentas reales.
+# Proactive Hermes — compatibilidad 0.2.0
 
 ## Host de referencia
 
-- Ruta inspeccionada: `/home/naroh/.hermes/hermes-agent`
+- Checkout: `/home/naroh/.hermes/hermes-agent`
 - Commit inspeccionado: `f9c3a8a1863b17d479335f804e04749aff7f5d84`
-- APIs usadas por el plugin: `register(ctx)`, `ctx.register_tool`, `ctx.register_hook`, `ctx.on_unload`, `ctx.spawn_task`, `ctx.get_config`, `ctx.profile_name` y `hermes_constants.get_hermes_home`.
-- No se usan métodos privados del host, parches, polling paralelo ni base de datos interna.
+- APIs públicas usadas: `register(ctx)`, `ctx.register_tool`, `ctx.register_hook`, `ctx.register_platform_handler`, `ctx.register_cli_command`, `ctx.on_unload`, `ctx.spawn_task`, `ctx.get_config`, `ctx.profile_name` y `hermes_constants.get_hermes_home`.
+- No se modifican ni importan APIs privadas del host.
 
 ## Evidencia ejecutada
 
-- `hermes plugins doctor . --ci` con `HERMES_HOME` temporal: **pasa**.
-- Descubrimiento: `proactive 0.1.0 (standalone)`.
-- Registro: 4 herramientas y 1 hook (`on_session_start`).
-- `python -m pytest`: **4 passed**.
-- Entry point instalado en un entorno virtual temporal y cargable: **pasa**.
-- Checkout de Hermes: sin archivos modificados por esta implementación; conserva solo el cambio no relacionado que ya existía en `plugins/context_engine/lcm/`.
+- `hermes plugins doctor . --ci` con `HERMES_HOME` temporal: **pasa sin avisos**.
+- Descubrimiento: `proactive 0.2.0 (standalone)`.
+- Registro: cuatro herramientas y cuatro hooks.
+- CLI real: `hermes proactive validate` devuelve configuración válida y confirma que la instalación actual sigue desactivada.
+- `uv run --with pytest python -m pytest -q`: **34 passed**.
+- `python3 -m compileall -q proactive tests`: **pasa**.
+- Parseo de los dos JSON Schema y `git diff --check`: **pasan**.
+- Integración HTTPS real aislada contra `https://example.com/`: scheduler reclamó un seguimiento, creó plan y run, ejecutó una lectura y persistió `http_status=200` con schema 6.
+- El checkout de Hermes no recibió cambios de esta implementación. Conserva el directorio no relacionado `plugins/context_engine/lcm/` que ya existía sin seguimiento.
 
-## Pendiente antes de declarar P0 completo
+## Contratos simulados
 
-La tarea supervisada real, cancelación en unload, propagación de perfil y selección/entrega en dos plataformas requieren una instancia aislada de Hermes con un event loop y conexiones de sandbox autorizadas. Los mocks no certifican conexión ni entrega. Esta entrega no activa el plugin en el perfil del propietario ni conecta una plataforma.
+- Scheduler único por contexto, cancelación en unload y cierre del store.
+- Actualización de una base bootstrap v2 a schema 6.
+- Scope aislado por perfil y propietario.
+- Autorización y revocación de grants antes de red.
+- Presupuesto reservado y consumido de forma transaccional.
+- Run con lease, fencing token e idempotency key.
+- Outbox con deduplicación, lease, fencing, retry y receipt.
+- Transporte neutral y entrega simulada por Telegram.
+- Consentimiento HMAC ligado a propuesta, plan, actor, destino, caducidad y nonce.
+- Consumo único y bloqueo de retry ciego cuando una mutación simulada queda en estado `unknown`.
 
-1. Descubrimiento del `plugin.yaml` y del entry point.
-2. Registro de cuatro herramientas y un hook público.
-3. Configuración `enabled: false` sin red, LLM ni lectura de cuentas.
-4. Al habilitarlo en perfil de prueba, tarea supervisada única y cancelación en unload.
-5. Restauración de estado y ausencia de modificaciones en el checkout de Hermes.
+## Compatibilidad de transportes
 
-Los mocks no certifican conexión ni entrega de una plataforma. La matriz de capacidades se añadirá cuando exista una conexión de sandbox autorizada.
+| Plataforma | Registro neutral | Verificación de actor/destino | Envío implementado | Sandbox real |
+|---|---:|---:|---:|---:|
+| Telegram | Sí | Sí, mediante `/proactive_verify` | Sí | No ejecutado |
+| Otras | Sí, mediante `TransportRegistry` | Requiere adaptador | No | No ejecutado |
+
+No se declara compatibilidad E2E con una plataforma sin una cuenta de sandbox autorizada.
+
+## Pendiente externo
+
+No se activaron fuentes, destinos ni cuentas reales del usuario. Para certificar toda la ruta de plataforma hacen falta:
+
+1. una identidad y un destino de sandbox explícitos;
+2. reiniciar el gateway tras configurar el perfil aislado;
+3. verificar el destino desde la plataforma;
+4. confirmar un `platform_message_id` real;
+5. repetir el contrato en una segunda plataforma autorizada.
+
+La versión 0.2.0 no publica operaciones externas de mutación. Sí incluye y prueba el executor central y el consentimiento de uso único con una operación simulada, incluida la salida incierta sin retry automático.

@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hermes.local/plugins/proactive/domain.schema.json",
+  "title": "Proactive domain objects",
+  "oneOf": [
+    {"$ref": "#/$defs/source"},
+    {"$ref": "#/$defs/grant"},
+    {"$ref": "#/$defs/observation"},
+    {"$ref": "#/$defs/evidence"},
+    {"$ref": "#/$defs/goal"},
+    {"$ref": "#/$defs/followup"},
+    {"$ref": "#/$defs/plan"},
+    {"$ref": "#/$defs/proposal"},
+    {"$ref": "#/$defs/consent"},
+    {"$ref": "#/$defs/run"},
+    {"$ref": "#/$defs/destination"},
+    {"$ref": "#/$defs/outbox"}
+  ],
+  "$defs": {
+    "id": {"type": "string", "minLength": 1},
+    "positiveRevision": {"type": "integer", "minimum": 1},
+    "source": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "account_ref", "resource_scope", "enabled", "permission_revision", "retention_days"],
+      "properties": {
+        "kind": {"$ref": "#/$defs/id"}, "account_ref": {"$ref": "#/$defs/id"},
+        "resource_scope": {"type": "object"}, "enabled": {"type": "boolean"},
+        "permission_revision": {"$ref": "#/$defs/positiveRevision"}, "cursor": {"type": "object"},
+        "retention_days": {"type": "integer", "minimum": 1}
+      }
+    },
+    "grant": {
+      "type": "object", "additionalProperties": false,
+      "required": ["permission", "operation_ids", "resource_scope", "limits"],
+      "properties": {
+        "permission": {"enum": ["observe", "read", "notify"]}, "source_id": {"type": ["string", "null"]},
+        "operation_ids": {"type": "array", "items": {"$ref": "#/$defs/id"}, "uniqueItems": true},
+        "resource_scope": {"type": "object"}, "destination_id": {"type": ["string", "null"]},
+        "limits": {"type": "object"}, "expires_at": {"type": ["string", "null"]}
+      }
+    },
+    "observation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["source_id", "source_event_key", "occurred_at", "received_at", "kind", "fingerprint", "facts", "origin"],
+      "properties": {
+        "source_id": {"$ref": "#/$defs/id"}, "source_event_key": {"$ref": "#/$defs/id"},
+        "occurred_at": {"$ref": "#/$defs/id"}, "received_at": {"$ref": "#/$defs/id"},
+        "kind": {"$ref": "#/$defs/id"}, "fingerprint": {"$ref": "#/$defs/id"}, "facts": {"type": "object"},
+        "expires_at": {"type": ["string", "null"]}, "origin": {"enum": ["user", "tool", "external", "plugin"]},
+        "correlation_id": {"type": ["string", "null"]}
+      }
+    },
+    "evidence": {
+      "type": "object", "additionalProperties": false,
+      "required": ["observation_id", "source_ref", "excerpt_redacted", "epistemic_status"],
+      "properties": {
+        "observation_id": {"$ref": "#/$defs/id"}, "source_ref": {"$ref": "#/$defs/id"},
+        "excerpt_redacted": {"type": "string"},
+        "epistemic_status": {"enum": ["documented", "user_stated", "inferred", "disputed", "retracted"]},
+        "supersedes_id": {"type": ["string", "null"]}, "expires_at": {"type": ["string", "null"]}
+      }
+    },
+    "goal": {
+      "type": "object", "additionalProperties": false,
+      "required": ["title", "status", "scope"],
+      "properties": {
+        "title": {"$ref": "#/$defs/id"}, "status": {"enum": ["active", "paused", "completed", "cancelled"]},
+        "scope": {"type": "object"}, "user_intent_ref": {"type": ["string", "null"]},
+        "parent_goal_id": {"type": ["string", "null"]}
+      }
+    },
+    "followup": {
+      "type": "object", "additionalProperties": false,
+      "required": ["goal_id", "reason", "status", "subject_key", "evidence_revision", "expires_at", "timezone", "confidence_band", "assumptions", "stop_rule"],
+      "properties": {
+        "goal_id": {"$ref": "#/$defs/id"},
+        "reason": {"enum": ["condition_wait", "missing_input", "next_step", "agent_commitment", "routine", "external_signal"]},
+        "status": {"enum": ["candidate", "ready", "waiting_input", "waiting_event", "suppressed", "checking", "awaiting_consent", "completed", "failed", "paused", "cancelled", "expired"]},
+        "subject_key": {"$ref": "#/$defs/id"}, "evidence_revision": {"$ref": "#/$defs/positiveRevision"},
+        "next_check_at": {"type": ["string", "null"]}, "deadline_at": {"type": ["string", "null"]},
+        "expires_at": {"$ref": "#/$defs/id"}, "timezone": {"$ref": "#/$defs/id"},
+        "confidence_band": {"enum": ["low", "medium", "high"]}, "assumptions": {"type": "object"},
+        "stop_rule": {"type": "object"}
+      }
+    },
+    "plan": {
+      "type": "object", "additionalProperties": false,
+      "required": ["operation_id", "operation_version", "parameters", "effect_class", "evidence_revision", "permission_revision"],
+      "properties": {
+        "operation_id": {"$ref": "#/$defs/id"}, "operation_version": {"$ref": "#/$defs/id"},
+        "parameters": {"type": "object"}, "effect_class": {"enum": ["informational", "mutation"]},
+        "evidence_revision": {"$ref": "#/$defs/positiveRevision"}, "permission_revision": {"$ref": "#/$defs/positiveRevision"}
+      }
+    },
+    "proposal": {"type": "object", "additionalProperties": false, "required": ["followup_id", "plan_id", "destination_id", "status", "expires_at", "priority", "reason_text", "suppression_key"], "properties": {"followup_id": {"$ref": "#/$defs/id"}, "plan_id": {"$ref": "#/$defs/id"}, "destination_id": {"$ref": "#/$defs/id"}, "status": {"enum": ["draft", "pending", "accepted", "rejected", "expired", "cancelled", "executing", "succeeded", "failed", "unknown"]}, "expires_at": {"$ref": "#/$defs/id"}, "priority": {"enum": ["normal", "low", "deadline"]}, "reason_text": {"$ref": "#/$defs/id"}, "suppression_key": {"$ref": "#/$defs/id"}}},
+    "consent": {"type": "object", "additionalProperties": false, "required": ["proposal_id", "plan_hash", "decision", "actor_ref", "verified_transport", "destination_id", "expires_at", "token_hash"], "properties": {"proposal_id": {"$ref": "#/$defs/id"}, "plan_hash": {"$ref": "#/$defs/id"}, "decision": {"enum": ["approved", "rejected"]}, "actor_ref": {"$ref": "#/$defs/id"}, "verified_transport": {"$ref": "#/$defs/id"}, "destination_id": {"$ref": "#/$defs/id"}, "expires_at": {"$ref": "#/$defs/id"}, "token_hash": {"$ref": "#/$defs/id"}}},
+    "run": {"type": "object", "additionalProperties": false, "required": ["followup_id", "plan_id", "effect_class", "status", "execution_key"], "properties": {"followup_id": {"$ref": "#/$defs/id"}, "plan_id": {"$ref": "#/$defs/id"}, "consent_id": {"type": ["string", "null"]}, "effect_class": {"enum": ["informational", "mutation"]}, "status": {"enum": ["queued", "running", "succeeded", "failed", "unknown", "cancelled"]}, "execution_key": {"$ref": "#/$defs/id"}}},
+    "destination": {"type": "object", "additionalProperties": false, "required": ["platform", "gateway_connection_ref", "address", "owner_platform_id", "kind", "capabilities", "verified_at", "enabled"], "properties": {"platform": {"$ref": "#/$defs/id"}, "gateway_connection_ref": {"$ref": "#/$defs/id"}, "address": {"type": "object"}, "owner_platform_id": {"$ref": "#/$defs/id"}, "kind": {"enum": ["private", "group"]}, "capabilities": {"type": "object"}, "verified_at": {"$ref": "#/$defs/id"}, "enabled": {"type": "boolean"}}},
+    "outbox": {"type": "object", "additionalProperties": false, "required": ["destination_id", "notification_key", "payload", "status", "next_attempt_at"], "properties": {"destination_id": {"$ref": "#/$defs/id"}, "followup_id": {"type": ["string", "null"]}, "proposal_id": {"type": ["string", "null"]}, "notification_key": {"$ref": "#/$defs/id"}, "payload": {"type": "object"}, "status": {"enum": ["pending", "sending", "sent", "failed", "unknown", "cancelled"]}, "next_attempt_at": {"$ref": "#/$defs/id"}}}
+  }
+}

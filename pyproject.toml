@@ -4,13 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hermes-plugin-proactive"
-version = "0.1.0"
+version = "0.2.0"
 description = "Plugin externo de proactividad segura para Hermes Agent"
 requires-python = ">=3.11"
-license = {text = "MIT"}
+license = "MIT"
 
 [project.entry-points."hermes_agent.plugins"]
 proactive = "proactive"
+
+[tool.setuptools.package-data]
+proactive = ["migrations/*.sql", "schemas/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
