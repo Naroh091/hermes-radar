@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["enabled", "mode", "owner", "destination", "observation", "scheduler", "notifications", "limits", "retention", "sources", "allowed_operations", "mutations"],
+  "properties": {
+    "enabled": {"type": "boolean"}, "mode": {"enum": ["shadow", "active"]},
+    "owner": {"$ref": "#/$defs/object"}, "destination": {"$ref": "#/$defs/object"},
+    "observation": {"$ref": "#/$defs/object"}, "scheduler": {"$ref": "#/$defs/object"},
+    "notifications": {"$ref": "#/$defs/object"}, "limits": {"$ref": "#/$defs/object"},
+    "retention": {"$ref": "#/$defs/object"}, "sources": {"type": "array"},
+    "allowed_operations": {"type": "array", "items": {"type": "string"}},
+    "mutations": {"$ref": "#/$defs/object"}
+  },
+  "$defs": {"object": {"type": "object", "additionalProperties": true}}
+}

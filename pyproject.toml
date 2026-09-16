@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hermes-plugin-proactive"
+version = "0.1.0"
+description = "Plugin externo de proactividad segura para Hermes Agent"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+
+[project.entry-points."hermes_agent.plugins"]
+proactive = "proactive"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

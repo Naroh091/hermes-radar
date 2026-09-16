@@ -1,0 +1,27 @@
+name: proactive
+version: 0.1.0
+description: Proactive Hermes helps Hermes Agent follow up on user goals, recurring tasks, and authorized external signals. It runs bounded informational checks within explicit grants, delivers selective updates through the chosen gateway, and requires authenticated consent before external changes.
+manifest_version: 2
+api_version: 1
+license: MIT
+tags: [proactive, followups, gateway, safety]
+provides_tools:
+  - proactive_status
+  - proactive_list
+  - proactive_inspect
+  - proactive_propose
+provides_hooks:
+  - on_session_start
+config_schema:
+  enabled: {type: bool, default: false, description: Instalación desactivada por defecto}
+  mode: {type: str, default: shadow, description: shadow o active}
+  owner: {type: dict, default: {}, description: Propietario y zona horaria}
+  destination: {type: dict, default: {}, description: Destino verificado del gateway}
+  observation: {type: dict, default: {}, description: Fuentes locales autorizadas}
+  scheduler: {type: dict, default: {}, description: Temporizador propio}
+  notifications: {type: dict, default: {}, description: Avisos al propietario}
+  limits: {type: dict, default: {}, description: Cuotas operativas}
+  retention: {type: dict, default: {}, description: Retención}
+  sources: {type: list, default: [], description: Fuentes habilitadas}
+  allowed_operations: {type: list, default: [], description: IDs de operaciones permitidas}
+  mutations: {type: dict, default: {}, description: Cambios externos desactivados por defecto}
