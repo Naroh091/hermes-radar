@@ -36,18 +36,16 @@
 
 | Plataforma | Registro neutral | Verificación de actor/destino | Envío implementado | Sandbox real |
 |---|---:|---:|---:|---:|
-| Telegram | Sí | Sí, mediante `/proactive_verify` | Sí | No ejecutado |
+| Telegram | Sí | Sí, mediante `/proactive_verify` | Sí | Verificado: entrega privada con `platform_message_id=10892` |
 | Otras | Sí, mediante `TransportRegistry` | Requiere adaptador | No | No ejecutado |
 
 No se declara compatibilidad E2E con una plataforma sin una cuenta de sandbox autorizada.
 
 ## Pendiente externo
 
-El perfil `default` está activo, sin fuentes periódicas. Telegram está configurado para el chat privado, pero la entrega permanece bloqueada hasta ejecutar `/proactive_verify`. Para certificar toda la ruta hacen falta:
+El perfil `default` está activo y el destino privado de Telegram está verificado. Una fuente temporal que devolvía HTTP 503 completó plan, run y outbox; Telegram confirmó `platform_message_id=10892`. La fuente se retiró después de la prueba. Queda pendiente:
 
-1. ejecutar `/proactive_verify` desde el chat privado configurado;
-2. confirmar que el destino queda persistido como verificado;
-3. provocar una notificación controlada y confirmar un `platform_message_id` real;
-4. repetir el contrato en una segunda plataforma autorizada.
+1. repetir el contrato en una segunda plataforma autorizada;
+2. implementar y reconciliar una operación mutante contra un proveedor de prueba.
 
 La versión 0.2.0 no publica operaciones externas de mutación. Sí incluye y prueba el executor central y el consentimiento de uso único con una operación simulada, incluida la salida incierta sin retry automático.
