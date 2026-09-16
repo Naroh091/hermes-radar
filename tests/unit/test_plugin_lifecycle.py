@@ -79,6 +79,34 @@ def test_scheduler_starts_once_and_cleanup_cancels_it(monkeypatch):
     asyncio.run(scenario())
 
 
+def test_scheduler_delegates_to_host_without_local_event_loop(monkeypatch):
+    class HostTask:
+        cancelled = False
+
+        def done(self):
+            return False
+
+        def cancel(self):
+            self.cancelled = True
+
+    class SyncContext(FakeContext):
+        def spawn_task(self, coroutine, name=None):
+            self.spawn_count += 1
+            coroutine.close()
+            return HostTask()
+
+    context = SyncContext()
+    store = DummyStore()
+    monkeypatch.setattr(proactive, "_store", lambda ctx: store)
+
+    proactive.on_session_start(context)
+
+    assert context.spawn_count == 1
+    assert id(context) in proactive._RUNTIME
+    proactive.cleanup(context)
+    assert store.closed
+
+
 def test_spawn_failure_is_fail_closed_and_releases_store(monkeypatch):
     async def scenario():
         context = FakeContext()

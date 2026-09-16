@@ -13,7 +13,7 @@
 - Descubrimiento: `proactive 0.2.0 (standalone)`.
 - Registro: cuatro herramientas y cuatro hooks.
 - CLI real: `hermes proactive validate` confirma la configuración activa del perfil `default`.
-- `uv run --with pytest python -m pytest -q`: **35 passed**.
+- `uv run --with pytest python -m pytest -q`: **36 passed**.
 - `python3 -m compileall -q proactive tests`: **pasa**.
 - Parseo de los dos JSON Schema y `git diff --check`: **pasan**.
 - Integración HTTPS real aislada contra `https://example.com/`: scheduler reclamó un seguimiento, creó plan y run, ejecutó una lectura y persistió `http_status=200` con schema 6.

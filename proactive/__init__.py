@@ -216,7 +216,6 @@ def on_session_start(ctx, **kwargs):
     try:
         cfg = load_config(ctx)
         if not cfg["enabled"]: return
-        asyncio.get_running_loop()
         current = _RUNTIME.get(id(ctx))
         if isinstance(current, dict):
             current_task = current.get("task")
