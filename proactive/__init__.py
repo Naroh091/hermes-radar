@@ -300,6 +300,7 @@ def telegram_factory(ctx):
                     await message.reply_text("No se pudo verificar el destino.")
 
         native.add_handler(CommandHandler("proactive_verify", verify), group=-1)
+        on_session_start(ctx)
 
     return factory
 
@@ -322,4 +323,3 @@ def register(ctx):
         description="Validate configuration, inspect scoped state, or run one safe cycle.",
     )
     ctx.on_unload(lambda: cleanup(ctx))
-    on_session_start(ctx)

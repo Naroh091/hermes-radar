@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
+import types
 
 import pytest
 
@@ -139,28 +141,34 @@ def test_store_requires_reliable_profile_identity(tmp_path, monkeypatch):
         proactive._store(context)
 
 
-def test_register_starts_scheduler_without_waiting_for_a_session(monkeypatch):
+def test_telegram_factory_starts_scheduler_after_transport_registration(monkeypatch):
     calls = []
 
-    class RegistrationContext:
-        def register_tool(self, **kwargs):
-            pass
+    class CommandHandler:
+        def __init__(self, command, callback):
+            self.command = command
+            self.callback = callback
 
-        def register_hook(self, *args, **kwargs):
-            pass
+    class Native:
+        bot = object()
 
-        def register_platform_handler(self, *args, **kwargs):
-            pass
+        def __init__(self):
+            self.handlers = []
 
-        def register_cli_command(self, **kwargs):
-            pass
+        def add_handler(self, handler, group=None):
+            self.handlers.append((handler, group))
 
-        def on_unload(self, callback):
-            pass
-
-    context = RegistrationContext()
+    telegram_module = types.ModuleType("telegram")
+    telegram_ext_module = types.ModuleType("telegram.ext")
+    telegram_ext_module.CommandHandler = CommandHandler
+    monkeypatch.setitem(sys.modules, "telegram", telegram_module)
+    monkeypatch.setitem(sys.modules, "telegram.ext", telegram_ext_module)
+    monkeypatch.setattr(proactive, "telegram_sender", lambda bot: lambda *args, **kwargs: None)
     monkeypatch.setattr(proactive, "on_session_start", lambda ctx, **kwargs: calls.append(ctx))
+    context = object()
+    native = Native()
 
-    proactive.register(context)
+    proactive.telegram_factory(context)(native, object())
 
     assert calls == [context]
+    assert native.handlers[0][0].command == "proactive_verify"
