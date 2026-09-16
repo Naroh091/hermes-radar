@@ -322,3 +322,4 @@ def register(ctx):
         description="Validate configuration, inspect scoped state, or run one safe cycle.",
     )
     ctx.on_unload(lambda: cleanup(ctx))
+    on_session_start(ctx)

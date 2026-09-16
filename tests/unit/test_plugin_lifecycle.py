@@ -137,3 +137,30 @@ def test_store_requires_reliable_profile_identity(tmp_path, monkeypatch):
 
     with pytest.raises(ValueError, match="profile identity"):
         proactive._store(context)
+
+
+def test_register_starts_scheduler_without_waiting_for_a_session(monkeypatch):
+    calls = []
+
+    class RegistrationContext:
+        def register_tool(self, **kwargs):
+            pass
+
+        def register_hook(self, *args, **kwargs):
+            pass
+
+        def register_platform_handler(self, *args, **kwargs):
+            pass
+
+        def register_cli_command(self, **kwargs):
+            pass
+
+        def on_unload(self, callback):
+            pass
+
+    context = RegistrationContext()
+    monkeypatch.setattr(proactive, "on_session_start", lambda ctx, **kwargs: calls.append(ctx))
+
+    proactive.register(context)
+
+    assert calls == [context]
