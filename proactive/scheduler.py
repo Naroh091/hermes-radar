@@ -34,6 +34,7 @@ def sync_configured_sources(store: Store, config: dict[str, Any], now: datetime 
     current = now or utc_now()
     stamp = iso(current)
     synced: list[dict[str, str]] = []
+    active_source_ids: set[str] = set()
     for raw in config["sources"]:
         if not isinstance(raw, dict):
             raise ValueError("each source must be an object")
@@ -51,6 +52,8 @@ def sync_configured_sources(store: Store, config: dict[str, Any], now: datetime 
         operations = [op for op in configured_operations if op in config["allowed_operations"]]
         if "http_status.check" not in operations:
             raise ValueError(f"source {source_id} requires allowed operation http_status.check")
+        if raw.get("enabled", True):
+            active_source_ids.add(f"configured:{source_id}")
         synced.append(
             store.sync_http_source(
                 source_id=source_id,
@@ -63,6 +66,7 @@ def sync_configured_sources(store: Store, config: dict[str, Any], now: datetime 
                 now=stamp,
             )
         )
+    store.disable_missing_configured_sources(active_source_ids, stamp)
     return synced
 
 

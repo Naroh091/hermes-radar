@@ -61,6 +61,20 @@ def test_source_schema_is_closed_and_materialization_is_idempotent(tmp_path: Pat
     assert "sources[0] has unknown keys: credential" in errors
 
 
+def test_removing_configured_source_disables_its_runtime_objects(tmp_path: Path):
+    cfg = configured()
+    store = Store(tmp_path / "db.sqlite3", Scope("profile-a", "owner-a"))
+    sync_configured_sources(store, cfg, NOW)
+
+    cfg["sources"] = []
+    sync_configured_sources(store, cfg, NOW)
+
+    assert store.db.execute("SELECT enabled FROM sources").fetchone()[0] == 0
+    assert store.db.execute("SELECT revoked_at IS NOT NULL FROM grants").fetchone()[0] == 1
+    assert store.db.execute("SELECT status FROM followups").fetchone()[0] == "paused"
+    store.close()
+
+
 def test_scheduler_executes_authorized_check_once_and_persists_run(tmp_path: Path, monkeypatch):
     cfg = configured()
     store = Store(tmp_path / "db.sqlite3", Scope("profile-a", "owner-a"))

@@ -514,6 +514,37 @@ class Store:
             )
         return {"source_id": source_key, "grant_id": grant_id, "goal_id": goal_id, "followup_id": followup_id}
 
+    def disable_missing_configured_sources(self, active_source_ids: set[str], now: str) -> int:
+        """Fail closed when a previously materialized source disappears from configuration."""
+        with self.transaction() as db:
+            rows = db.execute(
+                """SELECT id FROM sources
+                   WHERE profile_key=? AND owner_id=? AND kind='http_status'
+                     AND id LIKE 'configured:%' AND enabled=1""",
+                self._scope_values,
+            ).fetchall()
+            inactive = [row["id"] for row in rows if row["id"] not in active_source_ids]
+            for source_id in inactive:
+                suffix = source_id.removeprefix("configured:")
+                db.execute(
+                    """UPDATE sources SET enabled=0, updated_at=?, revision=revision+1,
+                              permission_revision=permission_revision+1
+                       WHERE profile_key=? AND owner_id=? AND id=?""",
+                    (now, *self._scope_values, source_id),
+                )
+                db.execute(
+                    """UPDATE grants SET revoked_at=COALESCE(revoked_at, ?), updated_at=?, revision=revision+1
+                       WHERE profile_key=? AND owner_id=? AND source_id=?""",
+                    (now, now, *self._scope_values, source_id),
+                )
+                db.execute(
+                    """UPDATE followups SET status='paused', updated_at=?, revision=revision+1
+                       WHERE profile_key=? AND owner_id=? AND id=?
+                         AND status NOT IN ('completed','cancelled','expired')""",
+                    (now, *self._scope_values, f"configured:{suffix}:followup"),
+                )
+        return len(inactive)
+
     def ensure_local_observation_source(self, now: str, retention_days: int) -> str:
         source_id = "local:session-hooks"
         with self.transaction() as db:

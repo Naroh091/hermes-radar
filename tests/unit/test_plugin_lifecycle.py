@@ -35,6 +35,9 @@ class DummyStore:
     def close(self):
         self.closed = True
 
+    def disable_missing_configured_sources(self, active_source_ids, now):
+        return 0
+
 
 def test_status_when_disabled_does_not_open_store(monkeypatch):
     class DisabledContext:

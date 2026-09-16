@@ -12,8 +12,8 @@
 - `hermes plugins doctor . --ci` con `HERMES_HOME` temporal: **pasa sin avisos**.
 - Descubrimiento: `proactive 0.2.0 (standalone)`.
 - Registro: cuatro herramientas y cuatro hooks.
-- CLI real: `hermes proactive validate` devuelve configuración válida y confirma que la instalación actual sigue desactivada.
-- `uv run --with pytest python -m pytest -q`: **34 passed**.
+- CLI real: `hermes proactive validate` confirma la configuración activa del perfil `default`.
+- `uv run --with pytest python -m pytest -q`: **35 passed**.
 - `python3 -m compileall -q proactive tests`: **pasa**.
 - Parseo de los dos JSON Schema y `git diff --check`: **pasan**.
 - Integración HTTPS real aislada contra `https://example.com/`: scheduler reclamó un seguimiento, creó plan y run, ejecutó una lectura y persistió `http_status=200` con schema 6.
@@ -43,12 +43,11 @@ No se declara compatibilidad E2E con una plataforma sin una cuenta de sandbox au
 
 ## Pendiente externo
 
-No se activaron fuentes, destinos ni cuentas reales del usuario. Para certificar toda la ruta de plataforma hacen falta:
+El perfil `default` está activo, sin fuentes periódicas. Telegram está configurado para el chat privado, pero la entrega permanece bloqueada hasta ejecutar `/proactive_verify`. Para certificar toda la ruta hacen falta:
 
-1. una identidad y un destino de sandbox explícitos;
-2. reiniciar el gateway tras configurar el perfil aislado;
-3. verificar el destino desde la plataforma;
-4. confirmar un `platform_message_id` real;
-5. repetir el contrato en una segunda plataforma autorizada.
+1. ejecutar `/proactive_verify` desde el chat privado configurado;
+2. confirmar que el destino queda persistido como verificado;
+3. provocar una notificación controlada y confirmar un `platform_message_id` real;
+4. repetir el contrato en una segunda plataforma autorizada.
 
 La versión 0.2.0 no publica operaciones externas de mutación. Sí incluye y prueba el executor central y el consentimiento de uso único con una operación simulada, incluida la salida incierta sin retry automático.
