@@ -20,7 +20,7 @@ let rest = null
 
 const TEXT = {
   es: {
-    title: 'Radar', empty: 'Nada en el radar.', emptyHint: 'Cuando llegue algo que merezca tu atención, aparecerá aquí.',
+    proposal: 'propuesta', title: 'Radar', empty: 'Nada en el radar.', emptyHint: 'Cuando llegue algo que merezca tu atención, aparecerá aquí.',
     error: 'El panel no se pudo cargar: ', tasks: 'tareas', proposals: 'Propuestas', checklist: 'Pendiente', draft: 'Propongo responder',
     context: 'Correo', later: 'Más tarde', mute: 'No avisar', done: 'Ya está hecho', report: 'Ver informe', hideReport: 'Ocultar informe',
     waiting: 'en espera', executing: 'en marcha', nothingPending: 'Nada que decidir ahora.', due: 'Vence', jobRunning: 'trabajando',
@@ -36,7 +36,7 @@ const TEXT = {
     designed: 'diseñado por el modelo', kindsHint: 'Los tipos nuevos salen de tareas repetidas que no encajan en los siete fijos.',
   },
   en: {
-    title: 'Radar', empty: 'Nothing on the radar.', emptyHint: 'When something deserves your attention, it will show up here.',
+    proposal: 'proposal', title: 'Radar', empty: 'Nothing on the radar.', emptyHint: 'When something deserves your attention, it will show up here.',
     error: 'The panel could not load: ', tasks: 'tasks', proposals: 'Proposals', checklist: 'Pending', draft: 'Suggested reply',
     context: 'Email', later: 'Later', mute: 'Mute', done: 'Already done', report: 'Show report', hideReport: 'Hide report',
     waiting: 'waiting', executing: 'running', nothingPending: 'Nothing to decide right now.', due: 'Due', jobRunning: 'working',
@@ -55,12 +55,14 @@ const TEXT = {
 const STATUS_ORDER = ['needs_user', 'in_progress', 'open', 'waiting', 'snoozed']
 
 const STYLE = `
-.rd-root { --rd-h: 0; --rd-tint: hsl(var(--rd-h) 70% 55% / 0.10); --rd-line: hsl(var(--rd-h) 60% 55% / 0.45); --rd-ink: hsl(var(--rd-h) 75% 58%); }
+.rd-root { --rd-h: 0; --rd-s: 70%; }
+.rd-hue { --rd-tint: hsl(var(--rd-h) var(--rd-s) 55% / 0.10); --rd-line: hsl(var(--rd-h) var(--rd-s) 55% / 0.45); --rd-ink: hsl(var(--rd-h) var(--rd-s) 60%); }
 .rd-card { position: relative; border: 1px solid var(--rd-line); border-radius: 10px; background: var(--rd-tint); overflow: hidden; cursor: pointer; transition: transform .12s ease, box-shadow .12s ease; text-align: left; width: 100%; }
 .rd-card:hover { transform: translateY(-1px); box-shadow: 0 6px 18px -10px hsl(var(--rd-h) 70% 40% / .55); }
 .rd-card:focus-visible, .rd-row:focus-visible { outline: 2px solid var(--ui-accent); outline-offset: 2px; }
 .rd-card[data-selected="true"] { box-shadow: 0 0 0 2px var(--rd-ink) inset; }
-.rd-eyebrow { font-size: 10px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--rd-ink); }
+.rd-eyebrow { font-size: 10px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--rd-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.rd-route { font-size: 22px; overflow-wrap: anywhere; }
 .rd-title { font-size: 14px; font-weight: 650; letter-spacing: -0.01em; line-height: 1.25; }
 .rd-big { font-size: 26px; font-weight: 750; letter-spacing: -0.03em; line-height: 1; font-variant-numeric: tabular-nums; }
 .rd-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
@@ -77,7 +79,7 @@ const STYLE = `
 .rd-dial { width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center; background: conic-gradient(var(--rd-ink) 0 25%, hsl(var(--rd-h) 60% 55% / .25) 25% 100%); position: relative; flex: none; }
 .rd-dial::after { content: ''; position: absolute; inset: 6px; border-radius: 50%; background: hsl(var(--rd-h) 70% 55% / .18); }
 .rd-dial span { position: relative; z-index: 1; font-size: 18px; }
-.rd-chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--rd-line); font-size: 10px; color: var(--ui-text-secondary); }
+.rd-chip { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--rd-line); font-size: 10px; color: var(--ui-text-secondary); }
 .rd-chip[data-live="true"]::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: hsl(140 60% 45%); animation: rd-pulse 1.6s ease-in-out infinite; }
 .rd-sweep { width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--ui-stroke-secondary); position: relative; overflow: hidden; background: radial-gradient(circle at center, transparent 0 30%, var(--ui-stroke-secondary) 30% 31%, transparent 31% 60%, var(--ui-stroke-secondary) 60% 61%, transparent 61%); }
 .rd-sweep::after { content: ''; position: absolute; inset: 0; background: conic-gradient(from 0deg, hsl(160 70% 55% / .55) 0 40deg, transparent 40deg 360deg); animation: rd-spin 6s linear infinite; }
@@ -119,7 +121,11 @@ function label(kind, language) {
 }
 
 function hueStyle(kind) {
-  return { '--rd-h': String(kind.hue || 0) }
+  return { '--rd-h': String(kind.hue || 0), '--rd-s': kind.id === 'other' || (!kind.hue && kind.layout === 'note') ? '0%' : '70%' }
+}
+
+function plural(n, t) {
+  return `${n} ${n === 1 ? t.proposal : t.proposals.toLowerCase()}`
 }
 
 function Chips({ task, t }) {
@@ -128,7 +134,7 @@ function Chips({ task, t }) {
   return jsxs('div', {
     className: 'flex flex-wrap items-center gap-1',
     children: [
-      pending ? jsx('span', { className: 'rd-chip', children: `${pending} ${t.proposals.toLowerCase()}` }) : null,
+      pending ? jsx('span', { className: 'rd-chip', children: plural(pending, t) }) : null,
       task.jobs_running ? jsx('span', { className: 'rd-chip', 'data-live': 'true', children: t.jobRunning }) : null,
       waiting && !task.jobs_running ? jsx('span', { className: 'rd-chip', children: t.waiting }) : null,
       task.draft ? jsx('span', { className: 'rd-chip', children: t.draftReady }) : null,
@@ -138,7 +144,7 @@ function Chips({ task, t }) {
 
 function Shell({ task, kind, t, selected, onSelect, children, className }) {
   return jsx('button', {
-    type: 'button', className: cn('rd-card', className), style: hueStyle(kind), 'data-selected': selected ? 'true' : 'false', onClick: () => onSelect(task.id),
+    type: 'button', className: cn('rd-card rd-hue', className), style: hueStyle(kind), 'data-selected': selected ? 'true' : 'false', onClick: () => onSelect(task.id),
     children,
   })
 }
@@ -157,7 +163,7 @@ function BoardingPass({ task, kind, t, language, selected, onSelect }) {
           className: 'flex flex-1 flex-col gap-1 p-3',
           children: [
             jsxs('div', { className: 'flex items-center justify-between gap-2', children: [jsx('span', { className: 'rd-eyebrow', children: a.code ? `PNR ${a.code}` : t.title }), jsx(Chips, { task, t })] }),
-            jsxs('div', { className: 'rd-big flex items-baseline gap-2', children: [jsx('span', { children: from }), to ? jsx('span', { className: 'text-(--ui-text-tertiary)', style: { fontSize: '16px' }, children: '→' }) : null, to ? jsx('span', { children: to }) : null] }),
+            jsxs('div', { className: 'rd-big rd-route flex flex-wrap items-baseline gap-2', children: [jsx('span', { children: from }), to ? jsx('span', { className: 'text-(--ui-text-tertiary)', style: { fontSize: '16px' }, children: '→' }) : null, to ? jsx('span', { children: to }) : null] }),
             jsx('div', { className: 'rd-title', children: task.title }),
             jsxs('div', {
               className: 'mt-1 flex gap-4 text-xs text-(--ui-text-secondary)',
@@ -373,7 +379,7 @@ function Drawer({ task, kind, t, language, onClose, onFeedback }) {
     .then((result) => { onFeedback({ ...result, text: result.text || (action === 'mute' ? t.muted : '') }); if (action !== 'later') onClose() })
     .catch((err) => onFeedback({ outcome: 'error', text: String(err) }))
   return jsx('div', {
-    className: 'rd-drawer rd-root', style: hueStyle(kind),
+    className: 'rd-drawer rd-hue', style: hueStyle(kind),
     children: jsx(ScrollArea, {
       className: 'h-full',
       children: jsxs('div', {
@@ -407,7 +413,7 @@ function Drawer({ task, kind, t, language, onClose, onFeedback }) {
 function Patterns({ patterns, t, onFeedback }) {
   if (!patterns.length) return jsx('div', { className: 'text-xs text-(--ui-text-tertiary)', children: t.noPatterns })
   return jsx('div', { className: 'grid gap-1', style: { gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }, children: patterns.map((p) => jsxs('div', {
-    className: 'rd-root rd-card flex items-start justify-between gap-2 p-2 text-xs', style: { '--rd-h': '160', cursor: 'default' },
+    className: 'rd-card rd-hue flex items-start justify-between gap-2 p-2 text-xs', style: { '--rd-h': '160', '--rd-s': '70%', cursor: 'default' },
     children: [
       jsxs('div', { children: [jsx('div', { className: 'font-medium', children: p.name || p.summary }), jsx('div', { className: 'text-(--ui-text-tertiary)', children: `${p.kind} · ${p.status} · x${p.support}` }), p.description ? jsx('div', { className: 'text-(--ui-text-secondary)', children: p.description }) : null] }),
       p.status === 'proposed' || p.status === 'candidate' ? jsx(Button, { size: 'sm', variant: 'ghost', onClick: () => post(`/patterns/${p.id}/dismiss`, {}).then(onFeedback).catch(() => {}), children: t.dismiss }) : null,
@@ -445,7 +451,7 @@ function Kinds({ kinds, t, language }) {
   return jsxs('div', {
     className: 'flex flex-wrap gap-1 text-xs',
     children: [
-      ...Object.entries(kinds).map(([id, k]) => jsxs('span', { className: 'rd-root rd-chip', style: hueStyle(k), title: k.rationale || '', children: [k.icon, ' ', label(k, language), k.origin === 'generated' ? jsx(Button, { size: 'sm', variant: 'ghost', className: 'h-4 px-1', onClick: () => post(`/card-kinds/${id}/disable`, {}).catch(() => {}), children: '✕' }) : null] }, id)),
+      ...Object.entries(kinds).map(([id, k]) => jsxs('span', { className: 'rd-chip rd-hue', style: { ...hueStyle({ ...k, id }), color: 'var(--rd-ink)' }, title: k.rationale || '', children: [k.icon, ' ', label(k, language), k.origin === 'generated' ? jsx(Button, { size: 'sm', variant: 'ghost', className: 'h-4 px-1', onClick: () => post(`/card-kinds/${id}/disable`, {}).catch(() => {}), children: '✕' }) : null] }, id)),
       generated.length ? null : jsx('span', { className: 'text-(--ui-text-tertiary)', children: t.kindsHint }),
     ],
   })
