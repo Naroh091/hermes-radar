@@ -27,7 +27,7 @@ def _signal(store: Store, source_id: str, ref: str, *, group: str = "thread:x", 
 
 
 def test_fresh_database_reaches_schema_9_and_rebuilt_tables_keep_fk_names(store: Store):
-    assert store.status()["schema_version"] == 11
+    assert store.status()["schema_version"] == 12
     tables = {row[0] for row in store.db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert {"signals", "tasks", "task_signals", "jobs", "facts", "preferences", "proposals", "plans", "runs"} <= tables
     sql = store.db.execute("SELECT sql FROM sqlite_master WHERE name='consents'").fetchone()[0]

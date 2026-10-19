@@ -19,7 +19,7 @@ def test_config_rejects_unknown_keys_and_invalid_mode():
 def test_store_migrates_and_keeps_scope_isolated(tmp_path: Path):
     db = Store(tmp_path / "radar.sqlite3", Scope("profile-a", "owner-a"))
     db.add_goal("goal-1", "Comprobar servicio", "2026-09-16T00:00:00Z")
-    assert db.status()["schema_version"] == 11
+    assert db.status()["schema_version"] == 12
     assert db.status()["counts"]["goals"] == 1
     db.close()
     other = Store(tmp_path / "other.sqlite3", Scope("profile-b", "owner-b"))

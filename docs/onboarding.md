@@ -128,7 +128,7 @@ Responde a cualquier aviso con lo que quieres cambiar y Radar lo guarda como pre
 
 Una hora después de arrancar, y luego cada 24 h, Radar busca patrones en las señales (correo, GitHub, turnos de chat, resultados de jobs). Cuando encuentra uno que merece automatizarse te llega una propuesta «Automatizar» en el resumen (nunca se ejecuta sola); aceptarla crea un cron del host que entrega en tu chat y cuyas salidas vuelven al radar; descartarla lo silencia. `/radar patterns` muestra lo detectado.
 
-El panel de Hermes Desktop se carga solo con el paquete enlazado en `~/.hermes/plugins/radar` (Capabilities → Plugins → Rescan si no aparece; el plugin debe estar en `plugins.enabled` para que su backend se monte). Muestra las tareas por estado, el detalle con el hilo, las propuestas con los mismos botones que Telegram, borradores, informe, patrones y preferencias.
+El panel de Hermes Desktop se carga solo con el paquete enlazado en `~/.hermes/plugins/radar` (Capabilities → Plugins → Rescan si no aparece; el plugin debe estar en `plugins.enabled` para que su backend se monte). Muestra las tareas por estado como tarjetas-objeto (tarjeta de embarque, ticket, PR, hoja de calendario, etiqueta, esfera), con un cajón lateral para el detalle: hilo, propuestas con los mismos botones que Telegram, borradores, informe, y abajo patrones, preferencias y los tipos de tarjeta (los que diseña el modelo para tareas repetidas se pueden desactivar ahí).
 
 ## 5. Comprobar
 

@@ -31,6 +31,7 @@ from radar.delivery.responses import OPEN_PROPOSAL, act_on_task, respond_to_prop
 from radar.jobs.service import start_or_wait  # noqa: E402
 from radar.models import TASK_TERMINAL  # noqa: E402
 from radar.patterns import describe as describe_pattern, dismiss as dismiss_pattern  # noqa: E402
+from radar.render.cards import BUILTIN as CARD_BUILTIN, artifact as card_artifact, assign as assign_card  # noqa: E402
 from radar.render.report import render_task_report  # noqa: E402
 from radar.schemas import CONFIG_DEFAULTS  # noqa: E402
 from radar.store import Scope, Store  # noqa: E402
@@ -109,9 +110,13 @@ def _proposal_view(proposal: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _task_view(store: Store, config: dict[str, Any], task: dict[str, Any], *, now_dt: datetime, with_proposals: bool = True) -> dict[str, Any]:
+def _task_view(store: Store, config: dict[str, Any], task: dict[str, Any], *, now_dt: datetime, with_proposals: bool = True,
+               generated_kinds: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     entities = task.get("entities") or {}
+    owner = config.get("owner") or {}
+    card = assign_card(task, generated_kinds or [])
     view = {
+        "card_kind": card["id"], "artifact": card_artifact(task, card, language=str(owner.get("language") or "es"), tz=str(owner.get("timezone") or "UTC"), now_dt=now_dt),
         "id": task["id"], "kind": task.get("kind"), "title": task.get("title"), "summary": task.get("summary"), "status": task.get("status"),
         "due_at": task.get("due_at"), "next_review_at": task.get("next_review_at"), "muted": bool(task.get("muted")), "updated_at": task.get("updated_at"),
         "created_at": task.get("created_at"), "confidence": task.get("confidence"),
@@ -142,7 +147,12 @@ def board() -> dict[str, Any]:
     now_dt = _now()
     open_statuses = tuple(s for s in ("open", "waiting", "needs_user", "in_progress", "snoozed") if s not in TASK_TERMINAL)
     rows = store.list_tasks(statuses=open_statuses, limit=100)
-    tasks = [_task_view(store, config, t, now_dt=now_dt) for t in rows if not t.get("muted")]
+    generated = [k for k in store.list_card_kinds(active_only=True) if k.get("origin") == "generated"]
+    tasks = [_task_view(store, config, t, now_dt=now_dt, generated_kinds=generated) for t in rows if not t.get("muted")]
+    card_kinds = {kind: {"label": spec["label"], "icon": spec["icon"], "hue": spec["hue"], "layout": spec["layout"], "origin": "builtin"} for kind, spec in CARD_BUILTIN.items()}
+    for k in generated:
+        card_kinds[k["id"]] = {"label": k.get("label") or {}, "icon": k.get("icon"), "hue": k.get("hue"), "layout": k.get("layout"), "origin": "generated", "support": k.get("support"),
+                               "rationale": (k.get("spec") or {}).get("rationale", "")}
     muted_tasks = [{"id": t["id"], "kind": t.get("kind"), "title": t.get("title"), "status": t.get("status"), "updated_at": t.get("updated_at")} for t in rows if t.get("muted")]
     order = {"needs_user": 0, "in_progress": 1, "open": 2, "waiting": 3, "snoozed": 4}
     tasks.sort(key=lambda t: (order.get(str(t["status"]), 9), -len(t.get("proposals") or []), str(t.get("due_at") or "9")))
@@ -159,7 +169,18 @@ def board() -> dict[str, Any]:
         "patterns": len(patterns), "preferences": len(preferences), "counts": counts, "muted": len(muted_tasks),
     }
     return {"generated_at": _iso(now_dt), "language": language, "mode": config.get("mode"), "trust_level": (config.get("trust") or {}).get("level"),
-            "tasks": tasks, "muted_tasks": muted_tasks, "patterns": patterns, "preferences": preferences, "stats": stats}
+            "tasks": tasks, "muted_tasks": muted_tasks, "patterns": patterns, "preferences": preferences, "stats": stats, "card_kinds": card_kinds,
+            "timezone": (config.get("owner") or {}).get("timezone", "UTC")}
+
+
+@router.post("/card-kinds/{kind_id}/disable")
+def disable_card_kind(kind_id: str) -> dict[str, Any]:
+    store, _ = _open()
+    try:
+        store.set_card_kind_status(kind_id, "disabled", _iso(_now()))
+    except KeyError:
+        raise HTTPException(status_code=404, detail="card kind not found")
+    return {"disabled": kind_id}
 
 
 @router.get("/tasks/{task_id}")
@@ -170,7 +191,7 @@ def task_detail(task_id: str) -> dict[str, Any]:
     except KeyError:
         raise HTTPException(status_code=404, detail="task not found")
     now_dt = _now()
-    view = _task_view(store, config, task, now_dt=now_dt)
+    view = _task_view(store, config, task, now_dt=now_dt, generated_kinds=[k for k in store.list_card_kinds(active_only=True) if k.get("origin") == "generated"])
     view["history"] = [_proposal_view(p) for p in store.list_proposals(task_id=task_id, limit=30)]
     view["signals"] = [
         {"id": s.get("id"), "kind": s.get("kind"), "occurred_at": s.get("occurred_at"), "title": s.get("title"), "snippet": (s.get("snippet") or "")[:600],

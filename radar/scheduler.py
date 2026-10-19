@@ -239,6 +239,13 @@ class Scheduler:
                 log.info("pattern mining: %s", outcome)
             except Exception as exc:
                 log.warning("pattern mining failed: %s", exc)
+            try:
+                from .render.cards import design_card_kinds
+
+                designed = await design_card_kinds(self.runtime, now_dt)
+                log.info("card kinds: %s", designed)
+            except Exception as exc:
+                log.warning("card design failed: %s", exc)
         self.store.finish_followup_check(item["id"], success=True, next_check_at=next_at, now=iso(self.clock()))
 
     # -- sources, signals, jobs ---------------------------------------------------------------------

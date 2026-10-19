@@ -20,7 +20,7 @@ def test_fresh_database_applies_all_domain_migrations(tmp_path: Path):
 
     status = store.status()
 
-    assert status["schema_version"] == 11
+    assert status["schema_version"] == 12
     assert {
         "sources",
         "grants",
@@ -218,7 +218,7 @@ def test_bootstrap_v2_database_upgrades_without_replaying_old_migrations(tmp_pat
     db.close()
 
     store = Store(path, Scope("profile-a", "owner-a"))
-    assert store.status()["schema_version"] == 11
+    assert store.status()["schema_version"] == 12
     assert {"grants", "evidence", "plans", "proposals", "destinations", "outbox", "budgets"} <= set(
         store.status()["counts"]
     )

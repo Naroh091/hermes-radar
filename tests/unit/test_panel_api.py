@@ -43,6 +43,8 @@ def test_board_detail_respond_and_preferences_through_the_panel_api(store, tmp_p
     assert task["id"] == "t1" and task["context"]["sender"] == "Bernd" and task["draft"].startswith("Hi Bernd") and task["entities"]["repo"] == "MalditaEs/DMS"
     assert task["proposals"][0]["options"][0]["id"] == "send" and task["proposals"][0]["draft_ref"] == "Draft ID: r1"
     assert board["patterns"][0]["id"] == "pat1" and "resumen" in board["patterns"][0]["summary"]
+    assert task["card_kind"] == "work_item" and task["artifact"]["layout"] == "ticket" and task["artifact"]["repo"] == "MalditaEs/DMS" and task["artifact"]["draft"] is True
+    assert board["card_kinds"]["trip"]["layout"] == "boarding-pass" and board["card_kinds"]["work_item"]["hue"] == 268 and board["timezone"] == "Europe/Madrid"
     detail = client.get("/api/plugins/radar/tasks/t1").json()
     assert detail["signals"][0]["meta"]["sender"].startswith("Bernd") and detail["history"][0]["id"] == "p1" and detail["checklist"][0]["item"] == "reproduce"
     report = client.get("/api/plugins/radar/tasks/t1/report").json()

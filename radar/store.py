@@ -1678,6 +1678,42 @@ class Store:
         ).fetchone()
         return str(row[0]) if row and row[0] else None
 
+    # -- card kinds ----------------------------------------------------------------------------
+    def upsert_card_kind(self, *, kind_id: str, label: dict[str, str], icon: str, hue: int, layout: str, spec: dict[str, Any], origin: str,
+                         support: int, now: str, status: str = "active") -> dict[str, Any]:
+        if origin not in {"builtin", "generated"} or status not in {"active", "disabled"}:
+            raise ValueError("invalid card kind")
+        with self.transaction() as db:
+            db.execute(
+                """INSERT INTO card_kinds (id, profile_key, owner_id, created_at, updated_at, revision, label_json, icon, hue, layout, spec_json, origin, status, support)
+                   VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(profile_key, owner_id, id) DO UPDATE SET label_json=excluded.label_json, icon=excluded.icon, hue=excluded.hue,
+                     layout=excluded.layout, spec_json=excluded.spec_json, support=excluded.support, updated_at=excluded.updated_at, revision=card_kinds.revision+1""",
+                (kind_id, *self._scope_values, now, now, canonical_json(self._object(label, "label")), icon, int(hue), layout,
+                 canonical_json(self._object(spec, "spec")), origin, status, int(support)),
+            )
+        return self.get_card_kind(kind_id)
+
+    def get_card_kind(self, kind_id: str) -> dict[str, Any]:
+        row = self.db.execute("SELECT * FROM card_kinds WHERE profile_key=? AND owner_id=? AND id=?", (*self._scope_values, kind_id)).fetchone()
+        if row is None:
+            raise KeyError(kind_id)
+        return self._decode(row) or {}
+
+    def list_card_kinds(self, *, active_only: bool = False) -> list[dict[str, Any]]:
+        rows = self.db.execute("SELECT * FROM card_kinds WHERE profile_key=? AND owner_id=? ORDER BY origin, id", self._scope_values).fetchall()
+        values = [self._decode(row) or {} for row in rows]
+        return [v for v in values if not active_only or v.get("status") == "active"]
+
+    def set_card_kind_status(self, kind_id: str, status: str, now: str) -> None:
+        if status not in {"active", "disabled"}:
+            raise ValueError("invalid card kind status")
+        with self.transaction() as db:
+            cursor = db.execute("UPDATE card_kinds SET status=?, updated_at=?, revision=revision+1 WHERE profile_key=? AND owner_id=? AND id=?",
+                                (status, now, *self._scope_values, kind_id))
+            if cursor.rowcount != 1:
+                raise KeyError(kind_id)
+
     def pending_signal_count(self) -> int:
         return self.db.execute(
             "SELECT COUNT(*) FROM signals WHERE profile_key=? AND owner_id=? AND triage_status='pending'",
