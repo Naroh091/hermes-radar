@@ -103,6 +103,7 @@ PLAN_SCHEMA = _obj(
             "reason": _STR,
         }),
         "message": _STR,
+        "escalation": _obj({"decision": {"type": "string", "enum": ["handle", "inform", "ask"]}, "why": _STR}),
     }
 )
 

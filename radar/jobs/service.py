@@ -65,8 +65,8 @@ def job_block_reason(
     jobs_cfg = config.get("jobs") or {}
     if not jobs_cfg.get("enabled", True) and not is_native:
         return "disabled"
-    if proposal.get("operation_id") == "check":
-        return "check"
+    if proposal.get("operation_id") in ("check", "inform"):
+        return "check"  # nothing to run: a consistency question or a piece of news
     task_id = proposal.get("task_id")
     if not task_id:
         return "no_task"

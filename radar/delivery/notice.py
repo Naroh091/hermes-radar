@@ -123,6 +123,12 @@ def _compose(task: dict[str, Any], proposals: list[dict[str, Any]], *, language:
     if findings:
         lines.extend(["", f"<b>{_esc(t(language, 'findings'))}:</b>"] + [f"• {_esc(fit(f, 300))}" for f in findings[:5]])
     buttons: list[list[dict[str, str]]] = []
+    news = [p for p in proposals if p.get("operation_id") == "inform"]
+    proposals = [p for p in proposals if p.get("operation_id") != "inform"]
+    for item in news[:1]:
+        if not situation and item.get("params", {}).get("message"):
+            lines.extend(["", _esc(fit(item["params"]["message"], situation_cap))])
+        buttons.append(proposal_buttons(item, language))
     if proposals:
         lines.extend(["", f"<b>{_esc(t(language, 'proposals'))}:</b>"])
         for index, proposal in enumerate(proposals[:4], 1):

@@ -1,12 +1,15 @@
 """Apply a validated plan: tasks, links, facts, attention, proposals and review timers."""
 from __future__ import annotations
 
+import re
+
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
 from ..i18n import t
+from ..trust import may_auto_run
 from ..models import TASK_TERMINAL, canonical_hash
 from .attention import resolve
 from .checklists import merge_checklist, template_for
@@ -87,6 +90,16 @@ def _observation(signals: list[dict[str, Any]], task_kind: str) -> dict[str, Any
         "project": meta.get("project", ""), "kind": task_kind, "source_kind": meta.get("source_kind", kind),
         "repo": meta.get("repo", ""),
     }
+
+
+
+def _clip_title(text: str, limit: int) -> str:
+    text = " ".join(str(text or "").split())
+    if len(text) <= limit:
+        return text
+    cut = text[: limit - 1]
+    space = cut.rfind(" ")
+    return (cut[:space] if space > limit // 2 else cut).rstrip(" ,;:") + "…"
 
 
 DECLINE_MEMORY_HOURS = 24
@@ -298,9 +311,15 @@ def apply(
         info_complete=True, muted=bool(task.get("muted")),
     )
     disposition = attention.disposition
+    escalation = str((plan.get("escalation") or {}).get("decision") or "ask")
+    read_steps = [p for p in plan.get("proposals") or [] if p.get("action_class") == "read" and p.get("operation") not in ("check", "inform")]
+    if (escalation == "handle" and read_steps and not owner_followup and disposition != "silent"
+            and may_auto_run(config.get("trust") or {}, "read", kind=task.get("kind"), operation_id=read_steps[0].get("operation") or None)):
+        disposition = "silent"  # the assistant looks first; the result re-plans and decides inform or ask
+    inform_only = escalation == "inform" and not (plan.get("proposals") or asks) and disposition != "silent" and bool(plan.get("message"))
     proposal_ids: list[str] = []
     terminal = task.get("status") in TASK_TERMINAL
-    if not terminal:
+    if not terminal or inform_only:  # news about a task that just completed still reaches the owner
         batch_key = "now" if owner_followup else {"notify_now": "now", "digest": "digest", "silent": "silent"}[disposition]
         candidates: list[dict[str, Any]] = []
         for check in asks:
@@ -310,6 +329,12 @@ def apply(
                 "options": [{"id": "ok", "label": t(language, "btn_ok")}, {"id": "wrong", "label": t(language, "btn_wrong")}],
             })
         candidates.extend(plan.get("proposals") or [])
+        if inform_only:
+            headline = re.split(r"(?<=[.!?])\s", str(plan.get("message") or "").strip(), maxsplit=1)[0]
+            candidates.append({
+                "title": _clip_title(headline, 80), "rationale": "", "action_class": "read", "operation": "inform", "when": "",
+                "urgency": "normal" if disposition == "notify_now" else "low", "options": [{"id": "ok", "label": t(language, "btn_ack")}],
+            })
         declined = declined_recently(store, task_id, now_dt)
         suppressed = 0
         attempted = 0

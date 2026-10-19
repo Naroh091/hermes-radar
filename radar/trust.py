@@ -15,7 +15,7 @@ _AUTO_BY_LEVEL = {
     "autonomous": frozenset({"read", "local"}),
 }
 NEVER_AUTO = frozenset({"payments.charge", "booking.reserve", "deploy.run", "github.merge_pr"})
-ASK_FIRST = frozenset({"cron.create"})  # reversible, but a standing automation is always the owner's call
+ASK_FIRST = frozenset({"cron.create", "task.update"})  # reversible, but automations and closing the owner's tasks are always their call
 
 
 def describe(level: str) -> dict[str, Any]:

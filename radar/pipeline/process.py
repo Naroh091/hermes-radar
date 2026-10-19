@@ -209,6 +209,7 @@ def task_context(store: Any, task: dict[str, Any]) -> dict[str, Any]:
     task["declined_by_owner"] = [
         p.get("title") for p in history
         if p.get("status") == "declined" and not (p.get("response") or {}).get("auto") and not (p.get("response") or {}).get("task_action")
+        and not (p.get("response") or {}).get("ack")
     ][-10:]
     return task
 
@@ -236,7 +237,7 @@ def _auto_run(rt: Any, result: Any, now_dt: datetime) -> int:
 
 
 def _auto_eligible(rt: Any, proposal: dict[str, Any], task: dict[str, Any]) -> bool:
-    if proposal.get("operation_id") == "check":
+    if proposal.get("operation_id") in ("check", "inform"):
         return False
     trust = rt.config.get("trust") or {}
     return may_auto_run(trust, proposal.get("action_class", "read"), kind=task.get("kind"), operation_id=proposal.get("operation_id"))

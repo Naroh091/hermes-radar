@@ -33,7 +33,8 @@ note when it matters, and treat them as possibly stale.
    action_class: read (search options, compare, investigate, analyse code), local (draft a reply, prepare
    a branch or draft PR, write a report, create a reminder) or external (send, book, pay, deploy, merge,
    publish, message a third party). operation: gmail.create_draft, gmail.reply, github.open_pr,
-   investigate, web.read, calendar.create, booking.reserve, cron.create, or "" when unsure. when: "" for
+   investigate, web.read, calendar.create, booking.reserve, cron.create, task.update (close or update a
+   tracked task: marks an invoice collected, a refund done), or "" when unsure. when: "" for
    now, or an ISO datetime when the step only makes sense later (online check-in opens 24h before
    departure). options: two or three short choices, ids in snake_case. The first one always means "do it";
    an optional middle one may mean "show me the details first" (the assistant then shows the full draft or
@@ -54,6 +55,15 @@ note when it matters, and treat them as possibly stale.
    needs an answer); digest for useful progress that can wait; silent when there is nothing to decide or
    learn. A fulfilled expectation is usually digest.
 7. message: one to three sentences for the owner (under 500 characters): what is going on and why it matters.
+8. escalation: who should act next. "handle" when the assistant can find out or sort it out by itself with
+   read steps before bothering the owner (open the notification, read the message, check whether the
+   payments arrived, look up the order): propose that read step first and nothing is sent until its result
+   comes back and you decide again. "inform" when there is an outcome worth telling but nothing to decide
+   (money received, a delivery completed, a message that only needs a summary): the message carries the news,
+   warm and short (one emoji is fine for good news), and proposals are empty or hold one cheap offer that
+   ties the news to a tracked task (mark the invoice as collected or the refund as done with task.update,
+   local). "ask" only when the owner must decide, something is at risk, or an irreversible action is on the
+   table. Never ask the owner to go and read or check something the assistant can read or check itself.
 Write message, titles, summaries, notes, check descriptions, proposal titles, rationales and option
 labels in {language}. Return only JSON matching the schema."""
 
@@ -156,6 +166,8 @@ def validate_plan(raw: Any) -> dict[str, Any]:
     disposition = notify.get("disposition", "digest")
     if disposition not in DISPOSITIONS:
         raise LlmError(f"notify.disposition out of range: {disposition!r}")
+    escalation = raw.get("escalation") if isinstance(raw.get("escalation"), dict) else {}
+    escalation_decision = escalation.get("decision") if escalation.get("decision") in ("handle", "inform", "ask") else "ask"
     return {
         "task_match": {"decision": decision, "task_id": _clip(match.get("task_id"), 80), "why": _clip_words(match.get("why"), 300)},
         "task": {
@@ -174,6 +186,7 @@ def validate_plan(raw: Any) -> dict[str, Any]:
         "proposals": proposals[:3],
         "notify": {"disposition": disposition, "reason": _clip_words(notify.get("reason"), 300)},
         "message": _clip_words(raw.get("message"), 800),
+        "escalation": {"decision": escalation_decision, "why": _clip_words(escalation.get("why"), 300)},
     }
 
 

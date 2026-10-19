@@ -99,7 +99,16 @@ def respond_to_proposal(
     title = proposal.get("title", "")
     option = (option or "").strip().lower()
     is_check = proposal.get("operation_id") == "check"
+    is_info = proposal.get("operation_id") == "inform"
     intent = ("decline" if option == "ok" else "accept" if option == "wrong" else option_intent(proposal, option)) if is_check else option_intent(proposal, option)
+    if is_info and proposal.get("status") in CANCELLABLE:
+        store.respond_proposal(proposal_id, decision="declined", response={**{"option": option, "actor": actor, "channel": channel, "note": note[:500]}, "ack": True}, now=now)
+        store.add_audit(
+            audit_id=str(uuid4()), event_type="owner_response", subject_type="proposal", subject_id=proposal_id,
+            correlation_id=proposal.get("task_id"), actor_kind="verified_owner", decision_code="acknowledged",
+            metadata={"option": option, "channel": channel}, now=now,
+        )
+        return {"outcome": "acknowledged", "text": t(language, "acknowledged"), "proposal": store.get_proposal(proposal_id)}
     if proposal.get("status") == WAITING and intent != "decline":
         return {"outcome": "stale", "text": t(language, "already_waiting", title=title), "proposal": proposal}
     if proposal.get("status") not in CANCELLABLE:

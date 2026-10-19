@@ -187,6 +187,8 @@ class Runtime:
             return gh if gh.available else None
         if kind == "cron":
             return HostCronProvider(allow_write=True)
+        if kind == "store":
+            return self.store
         if not callable(call_mcp):
             return None
         for source in self.config.get("sources") or []:

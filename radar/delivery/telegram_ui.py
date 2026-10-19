@@ -37,7 +37,7 @@ def authorize_update(config: dict[str, Any], update: Any) -> tuple[bool, str]:
 def _after_accept(rt: Any, result: dict[str, Any], option: str) -> str:
     """Start the approved step and say honestly whether it is running. Returns text to append to the answer."""
     proposal = result.get("proposal") or {}
-    if result.get("outcome") != "accepted" or not proposal or proposal.get("operation_id") == "check":
+    if result.get("outcome") != "accepted" or not proposal or proposal.get("operation_id") in ("check", "inform"):
         return ""
     language = rt.config.get("owner", {}).get("language", "es")
     try:

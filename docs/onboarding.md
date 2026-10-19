@@ -55,6 +55,10 @@ El aviso trae botones con las opciones del paso (por ejemplo «Sí, crea el CNAM
 
 Si no pudo arrancar, la propuesta queda en estado `waiting` (en `/radar status` aparece como «en espera», en `/radar list` con ⏸) y se reintenta en cada tick hasta que el motivo desaparece (por ejemplo, cuando se renueva el cupo diario). Pulsar «No» sobre el aviso la cancela.
 
+### Quién actúa: escalado
+
+Antes de avisarte, el planificador decide si el asistente puede encargarse solo (`handle`: lee la notificación, consulta el mensaje, comprueba los pagos; no te llega nada hasta que hay resultado), si solo hay que contarte algo (`inform`: un mensaje con la noticia y un botón «Vale», sin preguntas; si la noticia cierra una factura o una devolución que Radar seguía, ofrece marcarla con un botón) o si de verdad te toca decidir (`ask`). Bajo `cautious` lo de `handle` también pregunta, porque ningún paso corre solo.
+
 ### Borradores de respuesta
 
 Cuando la tarea viene de un hilo de correo, el aviso lleva un bloque «Correo» con el remitente del último mensaje, la fecha en tu zona horaria, el asunto, el número de mensajes del hilo y un extracto del último (sin el texto citado de mensajes anteriores). Si vigilas varias cuentas, indica cuál.

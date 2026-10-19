@@ -33,7 +33,10 @@ OPERATIONS: dict[str, dict[str, Any]] = {
     "github.comment": {"provider": "repo", "required": ("repo", "number", "body"), "description": "Post the approved comment on the pull request or issue"},
     "github.open_pr": {"provider": "repo", "required": ("repo", "head", "title", "body"), "description": "Open a draft pull request for the branch a job pushed, with the origin mark"},
     "cron.create": {"provider": "cron", "required": ("schedule", "prompt", "name"), "description": "Schedule a recurring Hermes job that prepares or reports (a pattern the owner approved)"},
+    "task.update": {"provider": "store", "required": ("task_id", "status"), "description": "Close or update a tracked task (an invoice collected, a refund done)"},
 }
+_TASK_STATUSES = {"done": "done", "collected": "done", "paid": "done", "closed": "done", "finished": "done", "abandoned": "abandoned", "cancelled": "abandoned",
+                  "waiting": "waiting", "open": "open", "needs_user": "needs_user", "in_progress": "in_progress"}
 # Invitation answers are read from the option id or its label; a plain "no" declines the proposal, not the invitation.
 _RESPONSE_STEMS = {"accepted": ("accept", "acept"), "declined": ("declin", "rechaz", "reject"), "tentative": ("tentativ", "maybe", "quiz")}
 _DRAFT_ID = re.compile(r"\b(r-?\d{6,}|[A-Za-z0-9_-]{10,})\b")
@@ -120,6 +123,15 @@ def plan(store: Any, proposal: dict[str, Any], task: dict[str, Any], option: str
         params.setdefault("number", int(meta.get("number") or 0))
         params.setdefault("body", str(draft or ""))
         params.setdefault("url", str(meta.get("url") or ""))
+    elif operation == "task.update":
+        params.setdefault("task_id", task["id"])
+        wanted = str(params.get("status") or "")
+        if wanted not in _TASK_STATUSES:
+            label = next((str(o.get("label")) for o in proposal.get("options") or [] if isinstance(o, dict) and str(o.get("id")) == option), "")
+            text = f"{option} {label}".lower()
+            wanted = next((v for k, v in _TASK_STATUSES.items() if k in text), "done")
+        params["status"] = _TASK_STATUSES.get(wanted, "done")
+        params.setdefault("note", str(proposal.get("title") or "")[:200])
     elif operation == "cron.create":
         entities = task.get("entities") or {}
         params.setdefault("schedule", str(entities.get("schedule_cron") or ""))
@@ -184,6 +196,8 @@ def job_prompt(operation: str, params: dict[str, Any], consent: dict[str, str]) 
 
 
 def describe(operation: str, params: dict[str, Any]) -> str:
+    if operation == "task.update":
+        return f"Mark task {params.get('task_id')} as {params.get('status')}"
     if operation == "cron.create":
         return f"Schedule '{params.get('name')}' ({params.get('schedule')})"
     if operation == "github.open_pr":
@@ -209,7 +223,25 @@ def _execute(operation: str, params: dict[str, Any], provider: Any) -> NativeOut
         return _github_open_pr(params, provider)
     if operation == "cron.create":
         return _cron_create(params, provider)
+    if operation == "task.update":
+        return _task_update(params, provider)
     return NativeOutcome("failed", error=f"unknown native operation {operation}")
+
+
+def _task_update(params: dict[str, Any], store: Any) -> NativeOutcome:
+    from ..models import TASK_TERMINAL
+
+    task_id, status = str(params["task_id"]), str(params["status"])
+    now = iso(datetime.now(timezone.utc))
+    task = store.set_task_status(task_id, status, now=now, reason=str(params.get("note") or "owner_update"))
+    if status in TASK_TERMINAL:
+        try:
+            store.cancel_task_followups(task_id, now)
+        except Exception:
+            pass
+    if str(task.get("status")) == status:
+        return NativeOutcome("succeeded", summary=f"Task '{task.get('title')}' marked {status}", effects=[f"Task {task_id} → {status}: {params.get('note') or ''}".strip()], refs=[f"task:{task_id}"])
+    return NativeOutcome("unknown", summary=f"Task status now {task.get('status')}, expected {status}", refs=[f"task:{task_id}"])
 
 
 def _cron_create(params: dict[str, Any], provider: Any) -> NativeOutcome:
