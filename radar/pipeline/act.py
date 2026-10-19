@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from ..i18n import t
 from ..trust import may_auto_run
+from .sessions import session_of, task_session_active
 from ..models import TASK_TERMINAL, canonical_hash
 from .attention import resolve
 from .checklists import merge_checklist, template_for
@@ -148,6 +149,8 @@ def remember_draft(store: Any, task: dict[str, Any], extract: dict[str, Any], no
     text = " ".join(str(extract.get("proposed_reply") or "").split("\r"))
     text = text.strip()
     entities = dict(task.get("entities") or {})
+    if text and not _has_correspondent(store, task["id"]):
+        text = ""  # nobody to reply to (a chat session, a calendar event): a "reply" makes no sense
     if text:
         refs = [str(r) for r in (extract.get("job") or {}).get("refs") or [] if isinstance(r, (str, int))]
         ref = next((r for r in refs if "draft" in r.lower()), "")
@@ -195,6 +198,14 @@ def remember_pr(store: Any, task_id: str, url: str, now: str) -> None:
         store.update_task(task_id, now=now, bump_version=False, entities=entities)
     except (KeyError, ValueError, RuntimeError):
         pass
+
+
+def _has_correspondent(store: Any, task_id: str) -> bool:
+    """True when the task has someone to answer: an email thread or a GitHub issue/PR."""
+    try:
+        return any(s.get("kind") in ("email", "github") for s in store.signals_for_task(task_id, limit=20))
+    except Exception:
+        return True
 
 
 def forget_draft(store: Any, task_id: str, now: str) -> None:
@@ -255,9 +266,12 @@ def apply(
         checklist = merge_checklist(template_for(kind), plan.get("checklist") or [])
         due_at = parse_iso(planned.get("due_at"))
         review_at = parse_iso(planned.get("next_review_at"))
+        entities = dict(extract.get("entities") or {})
+        if session_of(signals):
+            entities["session_id"] = session_of(signals)
         store.create_task(
             task_id=task_id, kind=kind, title=title[:200], summary=planned.get("summary") or extract.get("summary") or "",
-            entities=extract.get("entities") or {}, expectations=extract.get("expectations") or [],
+            entities=entities, expectations=extract.get("expectations") or [],
             checklist=checklist, now=now, next_review_at=iso(review_at) if review_at else None,
             due_at=iso(due_at) if due_at else None, confidence=planned.get("confidence", 0.5),
             origin_signal_id=signals[0]["id"] if signals else None,
@@ -311,6 +325,8 @@ def apply(
         info_complete=True, muted=bool(task.get("muted")),
     )
     disposition = attention.disposition
+    if task_session_active(store, task, now_dt, config) and not owner_followup:
+        disposition = "silent"  # the owner is already in that conversation
     escalation = str((plan.get("escalation") or {}).get("decision") or "ask")
     read_steps = [p for p in plan.get("proposals") or [] if p.get("action_class") == "read" and p.get("operation") not in ("check", "inform")]
     if (escalation == "handle" and read_steps and not owner_followup and disposition != "silent"

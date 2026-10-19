@@ -1670,6 +1670,14 @@ class Store:
                 raise KeyError(pattern_id)
         return self.get_pattern(pattern_id)
 
+    def last_session_turn_at(self, session_id: str) -> str | None:
+        row = self.db.execute(
+            """SELECT MAX(occurred_at) FROM signals WHERE profile_key=? AND owner_id=? AND kind='session_turn'
+               AND json_extract(meta_json, '$.session_id')=?""",
+            (*self._scope_values, session_id),
+        ).fetchone()
+        return str(row[0]) if row and row[0] else None
+
     def pending_signal_count(self) -> int:
         return self.db.execute(
             "SELECT COUNT(*) FROM signals WHERE profile_key=? AND owner_id=? AND triage_status='pending'",

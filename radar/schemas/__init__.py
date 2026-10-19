@@ -20,7 +20,7 @@ CONFIG_DEFAULTS: dict[str, Any] = {
         "allow_groups": False,
         "verified": False,
     },
-    "observation": {"local_sessions": False, "historical_import": False, "state_db_poll_seconds": 0, "debounce_seconds": 120},
+    "observation": {"local_sessions": False, "historical_import": False, "state_db_poll_seconds": 0, "debounce_seconds": 120, "session_quiet_minutes": 30},
     "context": {"memory": True, "sessions": True, "timeout_seconds": 45, "max_chars": 1500, "session_results": 3, "memory_tool": ""},
     "scheduler": {"tick_seconds": 60, "max_concurrent_checks": 2},
     "notifications": {
@@ -75,7 +75,7 @@ CONFIG_DEFAULTS: dict[str, Any] = {
 _NESTED_KEYS = {
     "owner": {"id", "timezone", "language"},
     "destination": {"platform", "gateway_connection_ref", "resolution", "address", "owner_platform_id", "allow_groups", "verified"},
-    "observation": {"local_sessions", "historical_import", "state_db_poll_seconds", "debounce_seconds"},
+    "observation": {"local_sessions", "historical_import", "state_db_poll_seconds", "debounce_seconds", "session_quiet_minutes"},
     "context": {"memory", "sessions", "timeout_seconds", "max_chars", "session_results", "memory_tool"},
     "scheduler": {"tick_seconds", "max_concurrent_checks"},
     "notifications": {"enabled", "quiet_start", "quiet_end", "daily_limit", "batch_minutes", "reminder_cooldown_hours"},
@@ -263,7 +263,7 @@ def validate_config(value: Any) -> tuple[bool, list[str]]:
         for field in ("local_sessions", "historical_import"):
             if not isinstance(observation.get(field), bool):
                 errors.append(f"observation.{field} must be boolean")
-        for field in ("state_db_poll_seconds", "debounce_seconds"):
+        for field in ("state_db_poll_seconds", "debounce_seconds", "session_quiet_minutes"):
             if not _non_negative_int(observation.get(field)):
                 errors.append(f"observation.{field} must be a non-negative integer")
     context = value.get("context")

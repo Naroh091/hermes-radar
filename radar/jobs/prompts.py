@@ -19,7 +19,8 @@ RULES = {
         "\"repo\"; do not open the pull request yourself: radar opens it as a draft with an origin mark in a later "
         "step. When the step prepares a reply or message, save it as a draft "
         "in the owner's mailbox with the mail tools (never send it) and return its complete text in "
-        "\"proposed_reply\" and the draft id in \"refs\": the owner reads and approves it from the notification."
+        "\"proposed_reply\" and the draft id in \"refs\": the owner reads and approves it from the notification. "
+        "Only tasks with a correspondent (an email thread, an issue) get a proposed_reply; otherwise leave it empty."
     ),
     "external": (
         "Allowed effects: exactly one external action, the one the owner approved below, and nothing else "

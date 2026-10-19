@@ -55,6 +55,10 @@ El aviso trae botones con las opciones del paso (por ejemplo «Sí, crea el CNAM
 
 Si no pudo arrancar, la propuesta queda en estado `waiting` (en `/radar status` aparece como «en espera», en `/radar list` con ⏸) y se reintenta en cada tick hasta que el motivo desaparece (por ejemplo, cuando se renueva el cupo diario). Pulsar «No» sobre el aviso la cancela.
 
+### Conversaciones en curso
+
+Lo que hablas con el agente en una sesión lo resuelve esa sesión. Radar solo aprende de ella cuando lleva media hora en silencio (`observation.session_quiet_minutes`), registra lo que la conversación se comprometió a hacer y, si vuelves a esa sesión, se aparta: sin avisos, sin jobs paralelos, con las revisiones pospuestas. Lo que la sesión deje a medias sí lo retoma después.
+
 ### Quién actúa: escalado
 
 Antes de avisarte, el planificador decide si el asistente puede encargarse solo (`handle`: lee la notificación, consulta el mensaje, comprueba los pagos; no te llega nada hasta que hay resultado), si solo hay que contarte algo (`inform`: un mensaje con la noticia y un botón «Vale», sin preguntas; si la noticia cierra una factura o una devolución que Radar seguía, ofrece marcarla con un botón) o si de verdad te toca decidir (`ask`). Bajo `cautious` lo de `handle` también pregunta, porque ningún paso corre solo.

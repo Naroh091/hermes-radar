@@ -55,6 +55,13 @@ note when it matters, and treat them as possibly stale.
    needs an answer); digest for useful progress that can wait; silent when there is nothing to decide or
    learn. A fulfilled expectation is usually digest.
 7. message: one to three sentences for the owner (under 500 characters): what is going on and why it matters.
+   A bundle of session_turn signals is a conversation the owner is having with their agent: that agent
+   already acts and reports inside the chat. Record what the conversation committed to (expectations, dates,
+   follow-ups the agent promised) and nothing else: never propose investigating in parallel, never propose a
+   reply (there is no third party), never ask what the chat is already handling; checklist items that assume
+   a reporter or a deployment (a reply to whoever reported it, verified in production) are not_applicable
+   unless the conversation says so. Proposals for such a task only make sense once the session is over and
+   something it promised is still undone.
 8. escalation: who should act next. "handle" when the assistant can find out or sort it out by itself with
    read steps before bothering the owner (open the notification, read the message, check whether the
    payments arrived, look up the order): propose that read step first and nothing is sent until its result

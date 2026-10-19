@@ -11,6 +11,7 @@ from ..llm import BudgetExhausted, LlmError
 from ..models import TASK_TERMINAL
 from ..trust import may_auto_run
 from .recall import build_query, recall_summary
+from .sessions import quiet_minutes, session_active, session_of, task_session_active
 from . import act, correlate, extract as extract_step, reason
 from .triage import triage_bundle
 
@@ -82,6 +83,13 @@ async def process_bundle(rt: Any, bundle: dict[str, Any], now_dt: datetime) -> d
     summary: dict[str, Any] = {"group": bundle["group_key"], "signals": len(signals)}
     existing_task = None
     kept = signals
+    if signals and all(s.get("kind") == "session_turn" for s in signals):
+        sid = session_of(signals)
+        if sid and session_active(store, sid, now_dt, config):
+            # The conversation is still doing the work: learn from it once it goes quiet.
+            store.defer_signals(signals, next_attempt_at=iso(now_dt + timedelta(minutes=quiet_minutes(config))), error="session_active", now=now)
+            summary["deferred"] = "session_active"
+            return summary
     if all(s.get("kind") in ("job_result", "cron_result") for s in signals) and signals:
         task_id = (signals[0].get("meta") or {}).get("task_id")
         if task_id:
@@ -239,6 +247,8 @@ def _auto_run(rt: Any, result: Any, now_dt: datetime) -> int:
 def _auto_eligible(rt: Any, proposal: dict[str, Any], task: dict[str, Any]) -> bool:
     if proposal.get("operation_id") in ("check", "inform"):
         return False
+    if task_session_active(rt.store, task, rt.clock(), rt.config):
+        return False  # the chat session is on it; no parallel work
     trust = rt.config.get("trust") or {}
     return may_auto_run(trust, proposal.get("action_class", "read"), kind=task.get("kind"), operation_id=proposal.get("operation_id"))
 
@@ -320,6 +330,14 @@ async def review_task(rt: Any, task: dict[str, Any], now_dt: datetime) -> dict[s
         return summary
     if not gate.available:
         summary["skipped"] = "llm_unavailable"
+        return summary
+    if task_session_active(store, task, now_dt, config):
+        minutes = quiet_minutes(config)
+        try:
+            store.update_task(task["id"], now=now, bump_version=False, next_review_at=iso(now_dt + timedelta(minutes=minutes)))
+        except (KeyError, ValueError, RuntimeError):
+            pass
+        summary["skipped"] = "session_active"
         return summary
     preferences = store.list_preferences(active_only=True)
     facts = store.list_facts(limit=40)

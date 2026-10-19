@@ -142,6 +142,7 @@
         "debounce_seconds",
         "historical_import",
         "local_sessions",
+        "session_quiet_minutes",
         "state_db_poll_seconds"
       ],
       "properties": {
@@ -160,6 +161,10 @@
         "debounce_seconds": {
           "type": "integer",
           "default": 120
+        },
+        "session_quiet_minutes": {
+          "type": "integer",
+          "default": 30
         }
       }
     },
