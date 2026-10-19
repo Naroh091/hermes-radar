@@ -42,6 +42,12 @@ const TEXT = {
     noPatterns: 'No patterns yet: a few weeks of signals are needed.', noPrefs: 'No preferences saved.',
   },
 }
+function ago(value) {
+  const ms = value ? Date.parse(value) : NaN
+  if (!Number.isFinite(ms) || typeof relativeTime !== 'function') return ''
+  try { return relativeTime(ms) } catch (_err) { return '' }
+}
+
 const KIND_ICON = { trip: '✈️', purchase: '🛒', work_item: '🛠️', commitment: '📌', check: '🔎', routine: '🔁', other: '•' }
 const STATUS_ORDER = ['needs_user', 'in_progress', 'open', 'waiting', 'snoozed']
 
@@ -103,7 +109,7 @@ function TaskRow({ task, selected, onSelect, t }) {
           task.entities && task.entities.pr ? jsx(Pill, { children: 'PR' }) : null,
           task.jobs_running ? jsx(Pill, { children: `${task.jobs_running} ${t.jobsRunning}` }) : null,
           task.due_at ? jsx('span', { children: `${t.due} ${String(task.due_at).slice(0, 10)}` }) : null,
-          jsx('span', { children: relativeTime ? relativeTime(task.updated_at) : '' }),
+          jsx('span', { children: ago(task.updated_at) }),
         ],
       }),
     ],
