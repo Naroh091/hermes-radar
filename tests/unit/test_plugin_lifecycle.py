@@ -7,7 +7,7 @@ import types
 
 import pytest
 
-import proactive
+import radar
 
 
 class FakeContext:
@@ -49,9 +49,9 @@ def test_status_when_disabled_does_not_open_store(monkeypatch):
             return default
 
     context = DisabledContext()
-    monkeypatch.setattr(proactive, "_store", lambda ctx: (_ for _ in ()).throw(AssertionError("store must stay closed")))
+    monkeypatch.setattr(radar, "_store", lambda ctx: (_ for _ in ()).throw(AssertionError("store must stay closed")))
 
-    payload = json.loads(proactive.status(context))
+    payload = json.loads(radar.status(context))
 
     assert payload["enabled"] is False
     assert payload["configured"] is False
@@ -62,21 +62,21 @@ def test_scheduler_starts_once_and_cleanup_cancels_it(monkeypatch):
     async def scenario():
         context = FakeContext()
         store = DummyStore()
-        monkeypatch.setattr(proactive, "_store", lambda ctx: store)
+        monkeypatch.setattr(radar, "_store", lambda ctx: store)
 
-        proactive.on_session_start(context)
-        proactive.on_session_start(context)
+        radar.on_session_start(context)
+        radar.on_session_start(context)
 
         assert context.spawn_count == 1
-        task = proactive._RUNTIME[id(context)]["task"]
+        task = radar._RUNTIME[id(context)]["task"]
         assert not task.done()
 
-        proactive.cleanup(context)
+        radar.cleanup(context)
         await asyncio.sleep(0)
 
         assert task.cancelled()
         assert store.closed
-        assert id(context) not in proactive._RUNTIME
+        assert id(context) not in radar._RUNTIME
 
     asyncio.run(scenario())
 
@@ -99,13 +99,13 @@ def test_scheduler_delegates_to_host_without_local_event_loop(monkeypatch):
 
     context = SyncContext()
     store = DummyStore()
-    monkeypatch.setattr(proactive, "_store", lambda ctx: store)
+    monkeypatch.setattr(radar, "_store", lambda ctx: store)
 
-    proactive.on_session_start(context)
+    radar.on_session_start(context)
 
     assert context.spawn_count == 1
-    assert id(context) in proactive._RUNTIME
-    proactive.cleanup(context)
+    assert id(context) in radar._RUNTIME
+    radar.cleanup(context)
     assert store.closed
 
 
@@ -113,16 +113,16 @@ def test_spawn_failure_is_fail_closed_and_releases_store(monkeypatch):
     async def scenario():
         context = FakeContext()
         store = DummyStore()
-        monkeypatch.setattr(proactive, "_store", lambda ctx: store)
+        monkeypatch.setattr(radar, "_store", lambda ctx: store)
 
         def fail_spawn(coroutine, name=None):
             raise OSError("host task registry unavailable")
 
         context.spawn_task = fail_spawn
-        proactive.on_session_start(context)
+        radar.on_session_start(context)
 
         assert store.closed
-        assert id(context) not in proactive._RUNTIME
+        assert id(context) not in radar._RUNTIME
 
     asyncio.run(scenario())
 
@@ -135,19 +135,19 @@ def test_store_requires_reliable_profile_identity(tmp_path, monkeypatch):
             return default
 
     context = MissingProfileContext()
-    monkeypatch.setattr(proactive, "get_hermes_home", lambda: tmp_path)
+    monkeypatch.setattr(radar, "get_hermes_home", lambda: tmp_path)
 
     with pytest.raises(ValueError, match="profile identity"):
-        proactive._store(context)
+        radar._store(context)
 
 
 def test_telegram_factory_starts_scheduler_after_transport_registration(monkeypatch):
     calls = []
 
-    class CommandHandler:
-        def __init__(self, command, callback):
-            self.command = command
+    class CallbackQueryHandler:
+        def __init__(self, callback, pattern=None):
             self.callback = callback
+            self.pattern = pattern
 
     class Native:
         bot = object()
@@ -160,15 +160,27 @@ def test_telegram_factory_starts_scheduler_after_transport_registration(monkeypa
 
     telegram_module = types.ModuleType("telegram")
     telegram_ext_module = types.ModuleType("telegram.ext")
-    telegram_ext_module.CommandHandler = CommandHandler
+    telegram_ext_module.CallbackQueryHandler = CallbackQueryHandler
     monkeypatch.setitem(sys.modules, "telegram", telegram_module)
     monkeypatch.setitem(sys.modules, "telegram.ext", telegram_ext_module)
-    monkeypatch.setattr(proactive, "telegram_sender", lambda bot: lambda *args, **kwargs: None)
-    monkeypatch.setattr(proactive, "on_session_start", lambda ctx, **kwargs: calls.append(ctx))
+    monkeypatch.setattr(radar, "telegram_sender", lambda bot: lambda *args, **kwargs: None)
+    monkeypatch.setattr(radar, "on_session_start", lambda ctx, **kwargs: calls.append(ctx))
     context = object()
     native = Native()
 
-    proactive.telegram_factory(context)(native, object())
+    radar.telegram_factory(context)(native, object())
 
     assert calls == [context]
-    assert native.handlers[0][0].command == "proactive_verify"
+    assert native.handlers[0][0].pattern == r"^p[at]:" and native.handlers[0][1] == -1
+
+
+def test_job_child_processes_never_start_the_scheduler_or_record_turns(monkeypatch):
+    monkeypatch.setenv("HERMES_RADAR_JOB", "1")
+    context = FakeContext()
+    monkeypatch.setattr(radar, "_store", lambda ctx: (_ for _ in ()).throw(AssertionError("store must stay closed")))
+
+    radar.on_session_start(context)
+    radar.capture_turn(context, user_message="hola", assistant_response="x", session_id="s", platform="cli")
+
+    assert context.spawn_count == 0
+    assert id(context) not in radar._RUNTIME

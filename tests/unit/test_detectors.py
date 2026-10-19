@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from proactive.detectors import detect
+from radar.detectors import detect
 
 NOW = datetime(2026, 9, 16, 10, 0, tzinfo=timezone.utc)
 

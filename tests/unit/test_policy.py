@@ -3,16 +3,16 @@ from __future__ import annotations
 from pathlib import Path
 import json
 
-import proactive
-from proactive.policy import Policy
-from proactive.store import Scope, Store
+import radar
+from radar.policy import Policy
+from radar.store import Scope, Store
 
 
 NOW = "2026-09-16T10:00:00Z"
 
 
 def _store_with_http_grant(tmp_path: Path, operation_ids: list[str]) -> Store:
-    store = Store(tmp_path / "proactive.sqlite3", Scope("profile-a", "owner-a"))
+    store = Store(tmp_path / "radar.sqlite3", Scope("profile-a", "owner-a"))
     store.add_source(
         source_id="source-1",
         kind="http_status",
@@ -115,9 +115,9 @@ def test_propose_tool_persists_authorized_immutable_plan(tmp_path: Path, monkeyp
             return values.get(key, default)
 
     context = Context()
-    monkeypatch.setattr(proactive, "_store", lambda ctx: store)
+    monkeypatch.setattr(radar, "_store", lambda ctx: store)
     payload = json.loads(
-        proactive.propose(
+        radar.propose(
             context,
             {
                 "followup_id": "followup-1",

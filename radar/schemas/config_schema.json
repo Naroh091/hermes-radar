@@ -1,0 +1,713 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Radar configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "allowed_operations",
+    "context",
+    "desktop",
+    "destination",
+    "enabled",
+    "ingress",
+    "jobs",
+    "limits",
+    "mode",
+    "mutations",
+    "notifications",
+    "observation",
+    "owner",
+    "retention",
+    "scheduler",
+    "sources",
+    "trust",
+    "trust_level",
+    "workspaces",
+    "jobs_per_day",
+    "auto_jobs_per_task",
+    "auto_job_cooldown_minutes",
+    "notices_per_day",
+    "quiet_start",
+    "quiet_end"
+  ],
+  "properties": {
+    "enabled": {
+      "type": "boolean",
+      "default": false
+    },
+    "mode": {
+      "enum": [
+        "shadow",
+        "active"
+      ],
+      "default": "shadow"
+    },
+    "owner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "language",
+        "timezone"
+      ],
+      "properties": {
+        "id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "timezone": {
+          "type": "string",
+          "default": "UTC"
+        },
+        "language": {
+          "type": "string",
+          "default": "es"
+        }
+      }
+    },
+    "destination": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "address",
+        "allow_groups",
+        "gateway_connection_ref",
+        "owner_platform_id",
+        "platform",
+        "resolution",
+        "verified"
+      ],
+      "properties": {
+        "platform": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "gateway_connection_ref": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "resolution": {
+          "enum": [
+            "explicit"
+          ],
+          "default": "explicit"
+        },
+        "address": {
+          "type": "object",
+          "properties": {
+            "chat_id": {
+              "type": [
+                "string",
+                "integer"
+              ]
+            },
+            "thread_id": {
+              "type": [
+                "string",
+                "integer"
+              ]
+            }
+          }
+        },
+        "owner_platform_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "allow_groups": {
+          "type": "boolean",
+          "default": false
+        },
+        "verified": {
+          "const": false,
+          "description": "Server-managed; configuration cannot assert it."
+        }
+      }
+    },
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "debounce_seconds",
+        "historical_import",
+        "local_sessions",
+        "state_db_poll_seconds"
+      ],
+      "properties": {
+        "local_sessions": {
+          "type": "boolean",
+          "default": false
+        },
+        "historical_import": {
+          "type": "boolean",
+          "default": false
+        },
+        "state_db_poll_seconds": {
+          "type": "integer",
+          "default": 0
+        },
+        "debounce_seconds": {
+          "type": "integer",
+          "default": 120
+        }
+      }
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["memory", "sessions", "timeout_seconds", "max_chars", "session_results", "memory_tool"],
+      "properties": {
+        "memory": {"type": "boolean", "default": true},
+        "sessions": {"type": "boolean", "default": true},
+        "timeout_seconds": {"type": "integer", "default": 45},
+        "max_chars": {"type": "integer", "default": 1500},
+        "session_results": {"type": "integer", "default": 3},
+        "memory_tool": {"type": "string", "default": ""}
+      }
+    },
+    "scheduler": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_concurrent_checks",
+        "tick_seconds"
+      ],
+      "properties": {
+        "tick_seconds": {
+          "type": "integer",
+          "default": 60
+        },
+        "max_concurrent_checks": {
+          "type": "integer",
+          "default": 2
+        }
+      }
+    },
+    "notifications": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "batch_minutes",
+        "daily_limit",
+        "enabled",
+        "quiet_end",
+        "quiet_start",
+        "reminder_cooldown_hours"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "quiet_start": {
+          "type": "string",
+          "default": "22:00"
+        },
+        "quiet_end": {
+          "type": "string",
+          "default": "08:00"
+        },
+        "daily_limit": {
+          "type": "integer",
+          "default": 3
+        },
+        "batch_minutes": {
+          "type": "integer",
+          "default": 30
+        },
+        "reminder_cooldown_hours": {
+          "type": "integer",
+          "default": 24
+        }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "checks_per_day",
+        "events_per_source_cycle",
+        "jobs_per_day",
+        "llm_calls_per_day",
+        "llm_input_tokens",
+        "llm_output_tokens",
+        "max_bundles_per_tick",
+        "signal_attempts"
+      ],
+      "properties": {
+        "events_per_source_cycle": {
+          "type": "integer",
+          "default": 100
+        },
+        "checks_per_day": {
+          "type": "integer",
+          "default": 200
+        },
+        "llm_calls_per_day": {
+          "type": "integer",
+          "default": 200
+        },
+        "llm_input_tokens": {
+          "type": "integer",
+          "default": 2000
+        },
+        "llm_output_tokens": {
+          "type": "integer",
+          "default": 500
+        },
+        "jobs_per_day": {
+          "type": "integer",
+          "default": 100
+        },
+        "max_bundles_per_tick": {
+          "type": "integer",
+          "default": 5
+        },
+        "signal_attempts": {
+          "type": "integer",
+          "default": 5
+        }
+      }
+    },
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "audit_days",
+        "full_content_days",
+        "full_content_kinds",
+        "observations_days",
+        "results_days",
+        "signals_days",
+        "snippet_chars"
+      ],
+      "properties": {
+        "observations_days": {
+          "type": "integer",
+          "default": 30
+        },
+        "results_days": {
+          "type": "integer",
+          "default": 30
+        },
+        "audit_days": {
+          "type": "integer",
+          "default": 90
+        },
+        "snippet_chars": {
+          "type": "integer",
+          "default": 500
+        },
+        "full_content_days": {
+          "type": "integer",
+          "default": 14
+        },
+        "full_content_kinds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "work_item"
+          ]
+        },
+        "signals_days": {
+          "type": "integer",
+          "default": 90
+        }
+      }
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "http_status",
+              "gmail",
+              "calendar",
+              "github"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "interval_seconds": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "retention_days": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "url": {
+            "type": "string"
+          },
+          "operations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "address": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "server": {
+            "type": "string"
+          },
+          "labels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "initial_lookback_hours": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "mapping": {
+            "type": "object"
+          },
+          "calendar_id": {
+            "type": "string"
+          },
+          "account": {"type": "string"},
+          "lookback_hours": {"type": "integer", "minimum": 0},
+          "lookahead_days": {"type": "integer", "minimum": 0},
+          "initial_import": {"type": "boolean"},
+          "repos": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "consume": {"type": "boolean"},
+          "all_branches": {"type": "boolean"},
+          "initial_import": {"type": "boolean"},
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "route": {
+            "type": "string"
+          },
+          "push": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "topic": {
+                "type": "string"
+              },
+              "credentials_path": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "default": []
+    },
+    "allowed_operations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "mutations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "require_per_action_consent"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "require_per_action_consent": {
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "trust": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "auto_external",
+        "level",
+        "overrides"
+      ],
+      "properties": {
+        "level": {
+          "enum": [
+            "cautious",
+            "balanced",
+            "autonomous"
+          ],
+          "default": "balanced"
+        },
+        "overrides": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": {
+              "enum": [
+                "auto",
+                "ask"
+              ]
+            }
+          },
+          "default": {}
+        },
+        "auto_external": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        }
+      }
+    },
+    "ingress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "gmail_receiver"
+      ],
+      "properties": {
+        "gmail_receiver": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "expected_subscription",
+            "hermes_webhook_url",
+            "host",
+            "port",
+            "public_url",
+            "require_oidc",
+            "route",
+            "service_account_email"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "host": {
+              "type": "string",
+              "default": "127.0.0.1"
+            },
+            "port": {
+              "type": "integer",
+              "default": 8666
+            },
+            "public_url": {
+              "type": "string",
+              "default": ""
+            },
+            "route": {
+              "type": "string",
+              "default": "gmail-push"
+            },
+            "hermes_webhook_url": {
+              "type": "string",
+              "default": "http://127.0.0.1:8644/webhooks/gmail-push"
+            },
+            "require_oidc": {
+              "type": "boolean",
+              "default": true
+            },
+            "service_account_email": {
+              "type": "string",
+              "default": ""
+            },
+            "expected_subscription": {
+              "type": "string",
+              "default": ""
+            }
+          }
+        }
+      }
+    },
+    "jobs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "auto_cooldown_minutes",
+        "enabled",
+        "max_auto_per_task",
+        "max_concurrent",
+        "max_seconds",
+        "max_turns",
+        "model",
+        "skills",
+        "toolsets",
+        "worktree"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "max_concurrent": {
+          "type": "integer",
+          "default": 2
+        },
+        "max_turns": {
+          "type": "integer",
+          "default": 20
+        },
+        "max_seconds": {
+          "type": "integer",
+          "default": 300
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "worktree": {
+          "type": "boolean",
+          "default": true
+        },
+        "skills": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "toolsets": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "max_auto_per_task": {
+          "type": "integer",
+          "default": 3,
+          "description": "Automatic jobs per task per day; owner-approved steps are not capped."
+        },
+        "auto_cooldown_minutes": {
+          "type": "integer",
+          "default": 15,
+          "description": "Minimum minutes between automatic jobs on the same task."
+        }
+      }
+    },
+    "workspaces": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "default": {}
+    },
+    "desktop": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "panel_label"
+      ],
+      "properties": {
+        "panel_label": {
+          "type": "string",
+          "default": "Radar"
+        }
+      }
+    },
+    "trust_level": {
+      "enum": [
+        "cautious",
+        "balanced",
+        "autonomous",
+        null
+      ],
+      "default": null,
+      "description": "Flat mirror of trust.level for settings forms; when set it wins."
+    },
+    "jobs_per_day": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "default": null,
+      "description": "Flat key for the Desktop form; overrides limits.jobs_per_day when set."
+    },
+    "auto_jobs_per_task": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "default": null,
+      "description": "Flat key for the Desktop form; overrides jobs.max_auto_per_task when set."
+    },
+    "auto_job_cooldown_minutes": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "default": null,
+      "description": "Flat key for the Desktop form; overrides jobs.auto_cooldown_minutes when set."
+    },
+    "notices_per_day": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "default": null,
+      "description": "Flat key for the Desktop form; overrides notifications.daily_limit when set."
+    },
+    "quiet_start": {
+      "type": [
+        "string",
+        "integer",
+        "null"
+      ],
+      "default": null,
+      "description": "Flat key for the Desktop form; overrides notifications.quiet_start when set (HH:MM)."
+    },
+    "quiet_end": {
+      "type": [
+        "string",
+        "integer",
+        "null"
+      ],
+      "default": null,
+      "description": "Flat key for the Desktop form; overrides notifications.quiet_end when set (HH:MM)."
+    }
+  }
+}

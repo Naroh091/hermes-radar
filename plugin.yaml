@@ -1,30 +1,48 @@
-name: proactive
-version: 0.2.0
-description: Proactive Hermes helps Hermes Agent follow up on user goals, recurring tasks, and authorized external signals. It runs bounded informational checks within explicit grants, delivers selective updates through the chosen gateway, and requires authenticated consent before external changes.
+name: radar
+version: 0.3.1
+description: Radar anticipates the owner's needs. It turns emails, chat turns and events into long-lived tasks (trips, purchases, work items, commitments), checks them against the owner's facts, delegates bounded read-only work to Hermes sessions, and surfaces concise proposals with buttons on Telegram. External actions always require explicit consent.
 manifest_version: 2
 api_version: 1
 license: MIT
-tags: [proactive, followups, gateway, safety]
+tags: [radar, followups, tasks, gmail, gateway, safety]
 provides_tools:
-  - proactive_status
-  - proactive_list
-  - proactive_inspect
-  - proactive_propose
+  - radar_status
+  - radar_tasks
+  - radar_resolve
+  - radar_explain
+  - radar_list
+  - radar_inspect
+  - radar_propose
+  - radar_preference
 provides_hooks:
   - on_session_start
   - post_llm_call
-  - post_tool_call
   - subagent_stop
+  - pre_gateway_dispatch
+  - pre_llm_call
 config_schema:
-  enabled: {type: bool, default: false, description: Instalación desactivada por defecto}
-  mode: {type: str, default: shadow, description: shadow o active}
-  owner: {type: dict, default: {}, description: Propietario y zona horaria}
-  destination: {type: dict, default: {}, description: Destino verificado del gateway}
-  observation: {type: dict, default: {}, description: Fuentes locales autorizadas}
-  scheduler: {type: dict, default: {}, description: Temporizador propio}
-  notifications: {type: dict, default: {}, description: Avisos al propietario}
-  limits: {type: dict, default: {}, description: Cuotas operativas}
-  retention: {type: dict, default: {}, description: Retención}
-  sources: {type: list, default: [], description: Fuentes habilitadas}
-  allowed_operations: {type: list, default: [], description: IDs de operaciones permitidas}
-  mutations: {type: dict, default: {}, description: Cambios externos desactivados por defecto}
+  enabled: {type: bool, default: false, description: Installed disabled by default}
+  mode: {type: str, choices: [shadow, active], default: shadow, label: Mode, description: "shadow runs everything but never notifies; active delivers notices to the verified destination"}
+  owner: {type: dict, default: {}, description: Owner identity, timezone and language}
+  destination: {type: dict, default: {}, description: Verified gateway destination}
+  observation: {type: dict, default: {}, description: Session observation and debounce}
+  context: {type: dict, default: {}, description: "Recalled context for planning: memory (the host's memory provider, through its own recall tool), sessions (host session_search), timeout_seconds, max_chars, session_results, memory_tool (pin a tool name)"}
+  scheduler: {type: dict, default: {}, description: Own ticker}
+  notices_per_day: {type: int, default: 8, label: Notices per day, description: "Daily cap of automatic Telegram notices. Results of steps you approved with a button are always delivered."}
+  quiet_start: {type: str, default: "22:00", label: Quiet hours start, description: "HH:MM in your timezone. Non-urgent notices wait until quiet hours end."}
+  quiet_end: {type: str, default: "08:00", label: Quiet hours end, description: "HH:MM in your timezone."}
+  notifications: {type: dict, default: {}, description: "Advanced: notices to the owner (enabled, batch_minutes, reminder_cooldown_hours)"}
+  limits: {type: dict, default: {}, description: Daily budgets}
+  retention: {type: dict, default: {}, description: Retention of snippets, content and audit}
+  sources: {type: list, default: [], description: Enabled sources (gmail, calendar, github, http_status)}
+  allowed_operations: {type: list, default: [], description: Allowed read operations for monitors}
+  mutations: {type: dict, default: {}, description: External changes stay disabled by default}
+  trust_level: {type: str, choices: [cautious, balanced, autonomous], default: balanced, label: Trust level, description: "cautious only looks (read steps run alone, any change asks first). balanced looks and prepares (read and local steps such as drafts, branches and draft PRs run alone; external actions always ask). autonomous also runs the external operations listed in trust.auto_external; paying, booking, deploying and merging never run alone."}
+  trust: {type: dict, default: {}, description: "Advanced: per-kind overrides ({work_item: {local: auto}}) and auto_external operations"}
+  ingress: {type: dict, default: {}, description: Gmail push receiver}
+  jobs_per_day: {type: int, default: 100, label: Jobs per day, description: "Daily budget of delegated hermes chat jobs (investigations, drafts, approved actions). Steps that find it spent wait for the next day."}
+  auto_jobs_per_task: {type: int, default: 3, label: Automatic jobs per task, description: "Jobs the plugin may start on its own per task and day. Steps you approve with a button are not capped."}
+  auto_job_cooldown_minutes: {type: int, default: 15, label: Minutes between automatic jobs, description: "Minimum spacing between automatic jobs on the same task."}
+  jobs: {type: dict, default: {}, description: "Advanced: delegated hermes chat jobs (max_concurrent, max_turns, max_seconds, model, worktree, skills, toolsets)"}
+  workspaces: {type: dict, default: {}, description: repo -> local checkout for work items}
+  desktop: {type: dict, default: {}, description: Desktop panel label}

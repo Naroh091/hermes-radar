@@ -3,18 +3,25 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "hermes-plugin-proactive"
-version = "0.2.0"
-description = "Plugin externo de proactividad segura para Hermes Agent"
+name = "hermes-plugin-radar"
+version = "0.3.1"
+description = "Radar: tasks, checks and proposals that anticipate the owner (Hermes Agent plugin)"
 requires-python = ">=3.11"
 license = "MIT"
 
+[project.optional-dependencies]
+receiver = ["aiohttp>=3.9", "cryptography>=41"]
+test = ["pytest>=8"]
+
 [project.entry-points."hermes_agent.plugins"]
-proactive = "proactive"
+radar = "radar"
 
 [tool.setuptools.package-data]
-proactive = ["migrations/*.sql", "schemas/*.json"]
+radar = ["migrations/*.sql", "schemas/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+
+[tool.setuptools.packages.find]
+include = ["radar", "radar.*"]

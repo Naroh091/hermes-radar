@@ -5,11 +5,11 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 
-from proactive.operations import OPERATIONS, OperationResult
-from proactive.scheduler import Scheduler, sync_configured_sources
-from proactive.schemas import CONFIG_DEFAULTS, validate_config
-from proactive.store import Scope, Store
-from proactive.transports import DeliveryReceipt, TransportRegistry
+from radar.operations import OPERATIONS, OperationResult
+from radar.scheduler import Scheduler, sync_configured_sources
+from radar.schemas import CONFIG_DEFAULTS, validate_config
+from radar.store import Scope, Store
+from radar.transports import DeliveryReceipt, TransportRegistry
 
 NOW = datetime(2026, 9, 16, 10, 0, tzinfo=timezone.utc)
 
@@ -50,8 +50,9 @@ def test_source_schema_is_closed_and_materialization_is_idempotent(tmp_path: Pat
     counts = store.status()["counts"]
     assert counts["sources"] == 1
     assert counts["grants"] == 1
-    assert counts["goals"] == 1
-    assert counts["followups"] == 1
+    assert counts["goals"] == 2  # the source's goal and the standing "routines" goal (pattern mining)
+    assert counts["followups"] == 2
+    assert [f["id"] for f in store.list_followups(limit=10) if f["id"].startswith("routine:")] == ["routine:pattern-mining"]
     store.close()
 
     invalid = configured()
@@ -91,8 +92,8 @@ def test_scheduler_executes_authorized_check_once_and_persists_run(tmp_path: Pat
     first = asyncio.run(scheduler.tick())
     second = asyncio.run(scheduler.tick())
 
-    assert first == {"claimed": 1, "failed": 0, "recovered": 0, "delivered": 0}
-    assert second == {"claimed": 0, "failed": 0, "recovered": 0, "delivered": 0}
+    assert {k: first[k] for k in ("claimed", "failed", "recovered", "delivered")} == {"claimed": 1, "failed": 0, "recovered": 0, "delivered": 0}
+    assert {k: second[k] for k in ("claimed", "failed", "recovered", "delivered")} == {"claimed": 0, "failed": 0, "recovered": 0, "delivered": 0}
     assert len(calls) == 1
     assert calls[0]["context"] == {"allowlist": ["status.example.test"]}
     assert store.status()["counts"]["plans"] == 1

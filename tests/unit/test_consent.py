@@ -6,9 +6,9 @@ from datetime import datetime, timezone
 
 import pytest
 
-from proactive.consent import ConsentSigner
-from proactive.executor import MutationExecutor
-from proactive.store import Scope, Store
+from radar.consent import ConsentSigner
+from radar.executor import MutationExecutor
+from radar.store import Scope, Store
 
 NOW = "2026-09-16T10:00:00Z"
 EXPIRY = "2026-09-16T11:00:00Z"
@@ -24,7 +24,7 @@ def prepared_store(tmp_path: Path):
     )
     plan = store.add_plan(
         plan_id="plan-1", followup_id="followup-1", operation_id="fixture.mutate",
-        operation_version="1", parameters={"value": "x"}, effect_class="mutation",
+        operation_version="1", parameters={"value": "x"}, effect_class="external",
         evidence_revision=1, permission_revision=1, now=NOW,
     )
     store.verify_destination(
@@ -104,7 +104,7 @@ def test_mutation_executor_never_retries_uncertain_side_effect(tmp_path: Path):
 
     class FixtureMutation:
         id = "fixture.mutate"
-        effect_class = "mutation"
+        effect_class = "external"
 
         @staticmethod
         def validate_parameters(parameters):

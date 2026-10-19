@@ -5,22 +5,22 @@ from pathlib import Path
 
 import pytest
 
-from proactive.models import StateTransitionError, canonical_hash, validate_transition
-from proactive.operations import HttpStatusCheck, operation_catalog
-from proactive.schemas import CONFIG_DEFAULTS, validate_config
-from proactive.schemas.domain import DOMAIN_SCHEMAS, validate_closed_object
-from proactive.store import Scope, Store
+from radar.models import StateTransitionError, canonical_hash, validate_transition
+from radar.operations import HttpStatusCheck, operation_catalog
+from radar.schemas import CONFIG_DEFAULTS, validate_config
+from radar.schemas.domain import DOMAIN_SCHEMAS, validate_closed_object
+from radar.store import Scope, Store
 
 
 NOW = "2026-09-16T10:00:00Z"
 
 
 def test_fresh_database_applies_all_domain_migrations(tmp_path: Path):
-    store = Store(tmp_path / "proactive.sqlite3", Scope("profile-a", "owner-a"))
+    store = Store(tmp_path / "radar.sqlite3", Scope("profile-a", "owner-a"))
 
     status = store.status()
 
-    assert status["schema_version"] == 6
+    assert status["schema_version"] == 11
     assert {
         "sources",
         "grants",
@@ -44,7 +44,7 @@ def test_fresh_database_applies_all_domain_migrations(tmp_path: Path):
 
 
 def test_same_database_never_leaks_rows_between_scopes(tmp_path: Path):
-    path = tmp_path / "proactive.sqlite3"
+    path = tmp_path / "radar.sqlite3"
     store_a = Store(path, Scope("profile-a", "owner-a"))
     store_a.add_goal("goal-a", "Objetivo A", NOW)
     store_a.close()
@@ -59,7 +59,7 @@ def test_same_database_never_leaks_rows_between_scopes(tmp_path: Path):
 
 
 def test_grant_check_is_fail_closed_and_bound_to_source_and_operation(tmp_path: Path):
-    store = Store(tmp_path / "proactive.sqlite3", Scope("profile-a", "owner-a"))
+    store = Store(tmp_path / "radar.sqlite3", Scope("profile-a", "owner-a"))
     store.add_source(
         source_id="source-1",
         kind="http_status",
@@ -92,7 +92,7 @@ def test_grant_check_is_fail_closed_and_bound_to_source_and_operation(tmp_path: 
 def test_plan_hash_is_canonical_and_plan_rows_are_immutable(tmp_path: Path):
     assert canonical_hash({"b": 2, "a": 1}) == canonical_hash({"a": 1, "b": 2})
 
-    store = Store(tmp_path / "proactive.sqlite3", Scope("profile-a", "owner-a"))
+    store = Store(tmp_path / "radar.sqlite3", Scope("profile-a", "owner-a"))
     store.add_goal("goal-1", "Comprobar servicio", NOW)
     store.add_followup(
         followup_id="followup-1",
@@ -114,7 +114,7 @@ def test_plan_hash_is_canonical_and_plan_rows_are_immutable(tmp_path: Path):
         operation_id="http_status.check",
         operation_version="1",
         parameters={"url": "https://status.example.test/health", "timeout_seconds": 5},
-        effect_class="informational",
+        effect_class="read",
         evidence_revision=1,
         permission_revision=1,
         now=NOW,
@@ -125,7 +125,7 @@ def test_plan_hash_is_canonical_and_plan_rows_are_immutable(tmp_path: Path):
         operation_id="http_status.check",
         operation_version="1",
         parameters={"timeout_seconds": 5, "url": "https://status.example.test/health"},
-        effect_class="informational",
+        effect_class="read",
         evidence_revision=1,
         permission_revision=1,
         now=NOW,
@@ -158,16 +158,16 @@ def test_failed_migration_rolls_back_schema_and_version(tmp_path: Path, monkeypa
     monkeypatch.setattr(Store, "migration_dir", migration_dir)
 
     with pytest.raises(sqlite3.DatabaseError):
-        Store(tmp_path / "proactive.sqlite3", Scope("profile-a", "owner-a"))
+        Store(tmp_path / "radar.sqlite3", Scope("profile-a", "owner-a"))
 
-    db = sqlite3.connect(tmp_path / "proactive.sqlite3")
+    db = sqlite3.connect(tmp_path / "radar.sqlite3")
     assert db.execute("SELECT MAX(version) FROM schema_version").fetchone()[0] == 1
     assert db.execute("SELECT name FROM sqlite_master WHERE name='broken'").fetchone() is None
     db.close()
 
 
 def test_bootstrap_v2_database_upgrades_without_replaying_old_migrations(tmp_path: Path):
-    path = tmp_path / "proactive.sqlite3"
+    path = tmp_path / "radar.sqlite3"
     db = sqlite3.connect(path)
     db.executescript(
         """
@@ -218,7 +218,7 @@ def test_bootstrap_v2_database_upgrades_without_replaying_old_migrations(tmp_pat
     db.close()
 
     store = Store(path, Scope("profile-a", "owner-a"))
-    assert store.status()["schema_version"] == 6
+    assert store.status()["schema_version"] == 11
     assert {"grants", "evidence", "plans", "proposals", "destinations", "outbox", "budgets"} <= set(
         store.status()["counts"]
     )
@@ -236,7 +236,7 @@ def test_domain_schemas_are_closed_and_reject_unknown_fields():
             "operation_id": "http_status.check",
             "operation_version": "1",
             "parameters": {"url": "https://status.example.test/"},
-            "effect_class": "informational",
+            "effect_class": "read",
             "evidence_revision": 1,
             "permission_revision": 1,
             "unexpected": True,
@@ -251,7 +251,7 @@ def test_operation_catalog_exposes_policy_metadata_and_validates_parameters(monk
     assert entry == {
         "id": "http_status.check",
         "version": "1",
-        "effect_class": "informational",
+        "effect_class": "read",
         "allowed_resource_types": ["https_endpoint"],
         "required_grants": ["read"],
         "timeout_seconds": 10,
@@ -268,7 +268,7 @@ def test_operation_catalog_exposes_policy_metadata_and_validates_parameters(monk
         called = True
         raise AssertionError("network must not be reached")
 
-    monkeypatch.setattr("proactive.operations.catalog.socket.create_connection", fail)
+    monkeypatch.setattr("radar.operations.catalog.socket.create_connection", fail)
     result = HttpStatusCheck().execute(
         None,
         {"url": "https://status.example.test/", "unknown": True},
@@ -309,7 +309,7 @@ def test_enabled_configuration_requires_owner_identity():
 
 
 def test_followup_transition_is_revision_checked_and_scope_bound(tmp_path: Path):
-    path = tmp_path / "proactive.sqlite3"
+    path = tmp_path / "radar.sqlite3"
     store = Store(path, Scope("profile-a", "owner-a"))
     store.add_goal("goal-1", "Comprobar servicio", NOW)
     store.add_followup(

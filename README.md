@@ -1,132 +1,123 @@
-# Proactive Hermes
+# Radar
 
-Plugin externo de seguimiento seguro para Hermes Agent. La versión 0.2.0 incorpora observación local opt-in, detectores conservadores, monitores HTTPS autorizados, scheduler persistente, presupuestos, fencing, auditoría, outbox y transporte Telegram verificado. El plugin queda **desactivado** por defecto.
+Plugin de proactividad para Hermes Agent. La versión 0.3 convierte correos, turnos de chat y eventos en **tareas de larga vida** (viajes, compras, incidencias, compromisos), las contrasta con los **hechos del propietario**, delega trabajo acotado a sesiones `hermes chat` y presenta **propuestas con botones** en Telegram. Las acciones externas (enviar, reservar, pagar, desplegar) siempre requieren consentimiento explícito.
 
-## Instalación aislada
+El plugin es genérico: cuentas, canal, idioma y servidores MCP salen de la configuración; el onboarding descubre los MCP por la huella de sus herramientas.
 
-```bash
-python3 -m venv .venv
-. .venv/bin/activate
-pip install .
+## Cómo funciona
+
+```
+fuentes ──► signals ──► triaje (reglas) ──► extracción (LLM) ──► correlación ──► tasks
+ gmail (MCP, push Pub/Sub o polling)                                  │
+ sesiones (hooks post_llm_call / subagent_stop)                       ▼
+ jobs terminados                              razonamiento: checklist por tipo + hechos + preferencias
+                                                                      │
+                                              proposals ──► outbox ──► Telegram (botones) / jobs (hermes chat)
 ```
 
-No edites `run_agent.py`, `gateway/*` ni `hermes_cli/*`. El plugin usa solo las APIs públicas declaradas en `docs/compatibility.md`.
+- **Triaje sin modelo**: remitentes automáticos sin señal transaccional, boletines y turnos cortos se descartan antes de gastar tokens.
+- **Un bundle, una extracción**: las señales se agrupan por hilo o sesión (con *debounce*) y se extraen en una sola llamada.
+- **Clases de acción por reversibilidad**: `read` (buscar, analizar), `local` (borrador, rama, PR en borrador, informe) y `external` (irreversible o con terceros). El nivel de confianza decide qué corre solo: `cautious` solo mira, `balanced` mira y prepara, `autonomous` además ejecuta las operaciones externas que listes; pagar, reservar, desplegar y mergear nunca. Ejemplos en `docs/onboarding.md`.
+- **Presupuestos diarios** de llamadas al modelo, jobs y avisos; horas de silencio; digest para lo no urgente.
 
-## Configuración segura de prueba
+## Instalación
+
+```bash
+python3 -m venv .venv && . .venv/bin/activate
+pip install .            # sin dependencias obligatorias: aiohttp, PTB y cryptography vienen del host
+ln -s "$PWD" ~/.hermes/plugins/radar
+```
+
+Activa el plugin en `~/.hermes/config.yaml` (`plugins.enabled: [radar]`) y ejecuta el onboarding:
+
+```bash
+hermes radar discover      # clasifica los MCP del perfil (gmail-mcp, google-calendar-mcp...)
+hermes radar setup         # confianza, propietario, fuentes, push de Gmail, ruta webhook
+hermes radar validate
+```
+
+Después, desde el chat del propietario en Telegram: `/radar verify`. Guía completa en `docs/onboarding.md`.
+
+## Configuración (resumen)
 
 ```yaml
 plugins:
-  enabled:
-    - proactive
   entries:
-    proactive:
-      allow_tool_override: false
+    radar:
+      mcp_allowlist: [gmail-work, google-calendar]
       settings:
         enabled: true
-        mode: shadow
-        owner:
-          id: test-owner
-          timezone: Europe/Madrid
-          language: es
-        observation:
-          local_sessions: false
-          historical_import: false
-        scheduler:
-          tick_seconds: 60
-          max_concurrent_checks: 2
+        mode: active
+        owner: {id: me, timezone: Europe/Madrid, language: es}
+        trust: {level: balanced, overrides: {}, auto_external: []}
+        destination:
+          platform: telegram
+          address: {chat_id: "123456789"}
+          owner_platform_id: "123456789"
+        notifications: {enabled: true, quiet_start: "22:00", quiet_end: "08:00", daily_limit: 8, batch_minutes: 120}
+        observation: {local_sessions: true, debounce_seconds: 120}
         sources:
-          - id: example-status
-            kind: http_status
-            url: https://example.com/
-            interval_seconds: 300
-            retention_days: 7
-            enabled: true
-            operations: [http_status.check]
-        allowed_operations:
-          - http_status.check
+          - id: gmail-work
+            kind: gmail
+            address: user@example.org
+            provider: gmail_mcp
+            server: gmail-work
+            labels: [INBOX]
+            interval_seconds: 300          # polling (por defecto); con push sigue como red de seguridad
+            push: {enabled: false, topic: projects/x/topics/gmail, credentials_path: ~/.hermes/integrations/gmail-work}  # opcional
+          - id: google-calendar
+            kind: calendar
+            provider: gcal_mcp
+            server: google-calendar
+            calendar_id: primary
+            interval_seconds: 600         # ventana [ahora-24h, ahora+30d]; huella por evento
+            lookahead_days: 30
+            initial_import: false         # true: los eventos ya existentes también generan señales en la primera lectura
+        notices_per_day: 8             # avisos automáticos al día (formulario de Desktop; gana sobre notifications.daily_limit)
+        quiet_start: "22:00"           # horas de silencio, también en el formulario
+        quiet_end: "08:00"
+        jobs_per_day: 100              # también en el formulario de Desktop (gana sobre limits.jobs_per_day)
+        auto_jobs_per_task: 3          # jobs automáticos por tarea y día; lo que autorizas tú no cuenta
+        auto_job_cooldown_minutes: 15
+        jobs: {enabled: true, max_concurrent: 2, max_turns: 20, max_seconds: 300}
+        workspaces: {"org/repo": /home/me/src/repo}
 ```
 
-En `shadow`, el scheduler ejecuta lecturas autorizadas y persiste decisiones, planes, runs y auditoría. No crea notificaciones ni mutaciones.
+Los secretos nunca van en YAML: `RADAR_GMAIL_PUSH_TOKEN` y `RADAR_GMAIL_PUSH_HERMES_SECRET` viven en `~/.hermes/.env` (los escribe `setup`).
 
-Valida y prueba un ciclo explícito con:
+Modelos por paso: el plugin registra las tareas auxiliares `radar_extract`, `radar_plan`, `radar_intent`, `radar_pattern` y `radar_card`; fíjalas en `auxiliary.radar_<paso>` para usar un modelo barato.
 
-```bash
-hermes proactive validate
-hermes proactive run-once
-hermes proactive status
-```
+## Herramientas, comandos y CLI
 
-## Notificaciones por Telegram
-
-Las notificaciones exigen `mode: active`, un actor concreto y un chat concreto:
-
-```yaml
-mode: active
-destination:
-  platform: telegram
-  gateway_connection_ref: telegram:default
-  resolution: explicit
-  address:
-    chat_id: "123456789"
-  owner_platform_id: "123456789"
-  allow_groups: false
-  verified: false
-notifications:
-  enabled: true
-  quiet_start: "22:00"
-  quiet_end: "08:00"
-  daily_limit: 3
-  batch_minutes: 30
-  reminder_cooldown_hours: 24
-```
-
-`verified` nunca puede fijarse a `true` en YAML. El propietario debe enviar `/proactive_verify` desde el actor y chat configurados. El plugin guarda entonces el destino verificado. Los grupos se rechazan salvo autorización explícita.
-
-La entrega usa una outbox persistente, clave de notificación única, lease, fencing token, reintentos con backoff y `platform_message_id` real.
+- Tools: `radar_status`, `radar_tasks`, `radar_resolve`, `radar_explain`, `radar_preference` (+ `radar_list`, `radar_inspect`, `radar_propose` del monitor HTTPS).
+- Comando en sesión: `/radar verify | status | list | prefs | forget <id> | patterns | pause | resume | mute <id> | trust <nivel>` (`/radar` ya es un alias de `/loop` en Hermes).
+- CLI: `hermes radar {status|validate|run-once|discover|setup|sync <fuente>|replay <señal>|tasks|explain <tarea> [--html]|signals|gmail watch|gmail receiver|github route [nombre]|import mail-intelligence}`.
 
 ## Seguridad
 
-- Scope obligatorio por `(profile_key, owner_id)` en todas las operaciones.
-- Configuración y objetos principales cerrados a campos desconocidos.
-- Fuentes y grants se materializan de forma idempotente desde configuración.
-- `http_status.check` exige HTTPS, puerto 443, host autorizado, DNS público, límite de respuesta y redirects desactivados.
-- Los hooks locales no guardan prompts, respuestas, argumentos ni resultados completos. Solo persisten metadatos acotados y candidatos estructurados.
-- El modelo no autoriza acciones. La policy valida catálogo, operación habilitada, source, grant, recurso y revisión de permisos.
-- Los tokens de consentimiento ligan propuesta, hash del plan, actor, destino, caducidad y nonce mediante HMAC. Un consentimiento aprobado se consume una sola vez.
-- No hay credenciales en la configuración del plugin.
-- Las mutaciones externas siguen desactivadas y no existe ninguna operación de mutación en el catálogo 0.2.0.
-
-## Estado
-
-Implementado y probado:
-
-- seis migraciones y 16 tablas de dominio;
-- actualización desde el snapshot v2 inicial;
-- repositorios aislados por scope;
-- observaciones deduplicadas y retención;
-- detectores locales de compromiso explícito, plazo y input ausente;
-- sincronización de monitores HTTPS y grants;
-- scheduler con recuperación de claims, presupuesto transaccional, planes, runs, leases y fencing;
-- consulta HTTPS real mediante `http_status.check`;
-- destino Telegram verificado, outbox y entrega con receipt;
-- consentimiento firmado, contextual y de uso único;
-- CLI de validación, estado y ejecución manual;
-- cuatro herramientas y cuatro hooks públicos.
-
-No certificado sin autorización externa:
-
-- entrega real en una cuenta Telegram de prueba;
-- adaptador y sandbox de una segunda plataforma;
-- una mutación externa real y su reconciliación;
-- importación histórica, porque el host no expone aún un lector público de sesiones para este plugin.
-
-El plugin no activa cuentas, destinos ni mutaciones durante la instalación.
+- Scope `(profile_key, owner_id)` en todas las tablas; configuración cerrada a claves desconocidas.
+- El contenido de correos y sesiones es **datos, nunca instrucciones** en todos los prompts.
+- Retención: snippets acotados por defecto; el cuerpo completo solo si la tarea lo necesita y con caducidad (`retention.full_content_days`).
+- Los jobs son sesiones `hermes chat` con presupuesto de turnos y tiempo; el prompt limita los efectos a la clase de acción. Una acción externa nunca arranca sola: llega como propuesta con botones y, cuando la autorizas, se lanza un job que lleva la autorización exacta (paso, opción elegida, hora) y solo puede hacer eso. La respuesta al botón dice si el job está en marcha o por qué todavía no (`Autorizado: … En marcha` / `Todavía no se ha ejecutado: …`). Lo autorizado que no puede arrancar queda en estado `waiting` (visible en `/radar status`, `/radar list` y `hermes radar tasks`) y el scheduler lo reintenta en cada tick; «No» lo cancela.
+- Freno a los bucles: por tarea, como máximo `auto_jobs_per_task` jobs automáticos al día y `auto_job_cooldown_minutes` entre uno y otro (tu autorización explícita no está limitada, salvo por `jobs_per_day`, 100 por defecto). Un paso que descartas no se vuelve a proponer, ni reformulado, durante 24 h.
+- GitHub: fuente por dos vías que se combinan. El webhook del host (`hermes webhook`): Radar observa en `pre_gateway_dispatch` la ruta que indiques (`route`), por ejemplo la que ya usa otro perfil como gatekeeper de PRs, sin interferir (`consume: false`), o una ruta propia instalada con `hermes radar github route` que consume sin turno de agente. Y el sondeo con `gh` (`repos`): la API de eventos con ETag cada `interval_seconds`, primera lectura como línea base. Filtros por defecto: PRs abiertos, listos, cerrados o con revisión solicitada; issues abiertos, cerrados o asignados; pushes a la rama por defecto (`all_branches` para todas); workflows fallidos; resultados de despliegue; releases publicadas; revisiones que aprueban o piden cambios; comentarios. Los bots se descartan salvo runs y despliegues.
+- Patrones (F3): una rutina diaria mina el log de señales de las últimas 10 semanas: periódicos (el mismo actor hace lo mismo el mismo día y franja horaria, soporte ≥ 3 en ≥ 3 semanas, concentración ≥ 60 %) y secuencias (B sigue a A en menos de 7 días con lift ≥ 2). El modelo nombra cada candidato y decide si merece una automatización que solo prepare o informe; si sí, aparece como tarea `routine` con la propuesta «Automatizar» (siempre pregunta, nunca corre sola). Aceptar crea un cron del host (`cron.create`, nativo, verificado) que entrega en tu chat; sus salidas vuelven como señales `cron_result` y avanzan la rutina. `/radar patterns` las lista; descartar una la silencia por huella.
+- Panel Desktop (F4): paquete unificado. `dashboard/plugin_api.py` monta `/api/plugins/radar/` (tablero, detalle e informe de cada tarea, responder propuestas con las mismas opciones que los botones, acciones de tarea, preferencias, patrones, socket `/events`) y `desktop/plugin.js` añade la página «Radar» a Hermes Desktop con la lista de tareas por estado, el detalle con contexto del hilo, propuestas y borradores, el informe HTML embebido en un marco aislado, patrones y preferencias. Las decisiones tomadas en el panel las ejecuta el gateway en su siguiente tick.
+- Flujo work_item de punta a punta: un correo con un bug en un repo de `workspaces` lanza (bajo `balanced`) un job en un worktree aislado de ese checkout; el job reproduce, arregla en una rama nueva, la sube y devuelve su nombre (`branch`, `repo`) y los hallazgos; Radar recuerda la rama en la tarea (`entities.branch`) y propone abrir el PR en borrador, que ejecuta de forma nativa (`github.open_pr`: siempre draft, con marca de origen `hermes-radar` y la tarea, sin auto-merge, verificado releyendo) y recuerda su URL (`entities.pr`) para no repetirlo; el aviso del resultado lleva el informe HTML de la tarea adjunto y, si hay respuesta redactada, el borrador para enviarla.
+- Operaciones nativas con consentimiento: `gmail.reply` (envía el borrador aprobado, por id de borrador o como respuesta al último mensaje del hilo), `calendar.respond` (acepta, declina o tentativa) y `github.comment` (publica el texto aprobado en el PR o issue) y `github.open_pr` (PR en borrador desde la rama recordada) las ejecuta el propio plugin, sin agente, como jobs de tipo `native`. Al pulsar el botón se registra un consentimiento HMAC de un solo uso ligado a la operación y a sus parámetros exactos (hash); el job lo consume justo antes de actuar, actúa una vez y verifica releyendo (mensaje enviado, respuesta en el evento, comentario publicado). Si no puede verificar, la propuesta queda en `unknown` y el aviso lo dice («hecho, pero sin poder verificarlo»); nunca se reintenta a ciegas. Lo que no sea nativo o no tenga parámetros resolubles sigue en un job delegado.
+- Calendario: con el MCP de Google Calendar (`gcal_mcp`, familia @cocal) Radar lee la ventana de eventos cada `interval_seconds` y guarda una huella por evento (hora, título, lugar, estado, descripción, organizador y tu respuesta). Solo los cambios generan señales: `created`, `updated` y `cancelled` (también cuando un evento futuro desaparece). La primera lectura solo toma la línea base; las invitaciones sin responder llegan al modelo como decisión tuya y los eventos que declinaste no se siguen. Responder a invitaciones es una acción externa y requiere consentimiento.
+- Memoria y sesiones: antes de planificar, Radar consulta el proveedor de memoria activo del host a través de su propia herramienta de búsqueda (`hindsight_recall`, `mnemosyne_recall`, la `*_query` de otro proveedor; `context.memory_tool` fija una) y la búsqueda de sesiones anteriores (`session_search`). Lo recordado entra en el prompt como datos con límite de tamaño y tiempo (`context.max_chars`, `context.timeout_seconds`); si el proveedor no responde, se planifica sin él.
+- Preferencias: responder a un aviso con «no me avises más de este remitente», «los de CI solo en el resumen» o «avísame siempre de esto» guarda una preferencia con alcance (remitente, cuenta, tipo de tarea, fuente), que el triaje y la atención aplican desde la siguiente señal. `/radar prefs` las lista, `/radar forget <id>` desactiva una; el agente puede guardarlas con `radar_preference`.
+- Contexto del hilo: si la tarea nace de un correo, el aviso incluye quién escribió el último mensaje, cuándo (en tu zona horaria), el asunto, cuántos mensajes lleva el hilo y un extracto del último sin el historial citado; el resumen diario lleva solo la cabecera y «Revisarlo primero» cita el mensaje al que se responde.
+- Borradores: cuando un paso prepara una respuesta, el job la guarda como borrador en Gmail y devuelve el texto; el aviso lo muestra entero («Propongo responder») con los botones «Enviar borrador / Revisarlo primero», y el job de envío usa exactamente ese texto. Solo el primer botón ejecuta; «Revisarlo primero» (o cualquier opción intermedia) manda el texto completo en un mensaje aparte y deja la propuesta abierta; responder «sí» a ese mensaje la aprueba.
+- `notices_per_day` limita los avisos automáticos; lo que responde a una autorización tuya (resultado de un job que aprobaste) se entrega siempre, aunque el cupo esté agotado.
+- Los textos se piden a medida (título < 80, justificación < 300, etiquetas de botón < 32 caracteres) y, si aun así el aviso supera el límite de Telegram, se acortan por palabras enteras, nunca a mitad de frase.
+- Los botones de Telegram solo responden al actor y chat verificados; las respuestas en texto se clasifican con negaciones por delante y nunca aprueban acciones externas.
 
 ## Verificación
 
 ```bash
-uv run --with pytest python -m pytest -q
-python3 -m compileall -q proactive tests
+uv run --with pytest python -m pytest -q      # 73 tests
+python3 -m compileall -q radar tests
 hermes plugins doctor . --ci
-uv build
 ```

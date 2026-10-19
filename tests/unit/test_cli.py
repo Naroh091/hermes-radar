@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 
-from proactive.cli import command
+from radar.cli import command
 
 
 class DisabledContext:
@@ -15,7 +15,7 @@ class DisabledContext:
 
 
 def test_disabled_cli_status_does_not_require_owner_or_open_store(capsys):
-    result = command(DisabledContext(), argparse.Namespace(proactive_action="status"))
+    result = command(DisabledContext(), argparse.Namespace(radar_action="status"))
     payload = json.loads(capsys.readouterr().out)
     assert result == 0
     assert payload == {"enabled": False, "configured": False, "mode": "shadow", "store": None}

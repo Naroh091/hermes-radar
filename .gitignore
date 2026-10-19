@@ -1,4 +1,18 @@
-*.egg-info/
+# Python
 __pycache__/
-.pytest_cache/
 *.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.venv/
+uv.lock
+
+# Local state and artifacts (never the plugin's data or secrets)
+.herdr-web-ui/
+*.sqlite3
+*.sqlite3-*
+.env
+*.log
+.DS_Store
+.codegraph/
