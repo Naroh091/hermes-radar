@@ -28,6 +28,7 @@ const TEXT = {
     kinds: { trip: 'Viaje', purchase: 'Compra', work_item: 'Trabajo', commitment: 'Compromiso', check: 'Comprobación', routine: 'Rutina', other: 'Otra' },
     sent: 'Hecho: ', notDone: 'No ejecutado: ', mode: 'modo', trust: 'confianza', refresh: 'Actualizar', detail: 'Detalle', history: 'Historial',
     noPatterns: 'Aún no hay patrones: hacen falta unas semanas de señales.', noPrefs: 'Sin preferencias guardadas.',
+    mutedGroup: 'Silenciadas', unmute: 'Reactivar', muted: 'Silenciada: no volverá a avisar.', unmuted: 'Reactivada.',
   },
   en: {
     title: 'Radar', empty: 'Nothing on the radar right now.', loading: 'Loading…', error: 'The panel could not load: ',
@@ -40,6 +41,7 @@ const TEXT = {
     kinds: { trip: 'Trip', purchase: 'Purchase', work_item: 'Work item', commitment: 'Commitment', check: 'Check', routine: 'Routine', other: 'Other' },
     sent: 'Done: ', notDone: 'Not executed: ', mode: 'mode', trust: 'trust', refresh: 'Refresh', detail: 'Detail', history: 'History',
     noPatterns: 'No patterns yet: a few weeks of signals are needed.', noPrefs: 'No preferences saved.',
+    mutedGroup: 'Muted', unmute: 'Unmute', muted: 'Muted: it will not notify again.', unmuted: 'Unmuted.',
   },
 }
 function ago(value) {
@@ -204,7 +206,9 @@ function ReportFrame({ taskId, t }) {
 function TaskDetail({ task, t, onFeedback }) {
   const proposals = task.proposals || []
   const missing = (task.checklist || []).filter((c) => c.status === 'missing')
-  const taskAction = (action) => post(`/tasks/${task.id}/action`, { action }).then(onFeedback).catch((err) => onFeedback({ outcome: 'error', text: String(err) }))
+  const taskAction = (action) => post(`/tasks/${task.id}/action`, { action })
+    .then((result) => onFeedback({ ...result, text: result.text || (action === 'mute' ? t.muted : '') }))
+    .catch((err) => onFeedback({ outcome: 'error', text: String(err) }))
   return jsxs('div', {
     className: 'flex flex-col gap-3',
     children: [
@@ -316,6 +320,7 @@ function RadarPage() {
   const language = data && data.language && TEXT[data.language] ? data.language : 'es'
   const t = TEXT[language]
   const tasks = (data && data.tasks) || []
+  const mutedTasks = (data && data.muted_tasks) || []
   const selected = useMemo(() => tasks.find((task) => task.id === selectedId) || tasks[0] || null, [tasks, selectedId])
   const groups = useMemo(() => STATUS_ORDER.map((status) => [status, tasks.filter((task) => task.status === status)]).filter(([, items]) => items.length), [tasks])
   const onFeedback = (result) => {
@@ -343,7 +348,10 @@ function RadarPage() {
           jsx(Button, { size: 'sm', variant: 'ghost', onClick: () => refetch(), children: t.refresh }),
         ],
       }),
-      feedback ? jsx('div', { className: cn('px-3 py-1 text-xs', feedback.tone === 'error' ? 'text-red-400' : 'text-(--ui-text-secondary)'), children: feedback.text }) : null,
+      feedback && feedback.text ? jsx('div', {
+        className: cn('mx-3 my-1 rounded-md border px-3 py-1.5 text-xs', feedback.tone === 'error' ? 'border-red-500/50 text-red-400' : 'border-(--ui-accent)/50 text-(--ui-text-secondary)'),
+        children: feedback.text,
+      }) : null,
       jsxs('div', {
         className: 'flex min-h-0 flex-1',
         children: [
@@ -353,10 +361,22 @@ function RadarPage() {
               className: 'h-full',
               children: jsx('div', {
                 className: 'flex flex-col gap-3 p-2',
-                children: tasks.length ? groups.map(([status, items]) => jsx(Section, {
-                  title: `${t.status[status] || status} (${items.length})`,
-                  children: jsx('div', { className: 'flex flex-col gap-1', children: items.map((task) => jsx(TaskRow, { task, selected: selected && selected.id === task.id, onSelect: setSelectedId, t }, task.id)) }),
-                }, status)) : jsx(EmptyState, { title: t.empty }),
+                children: [
+                  ...(tasks.length ? groups.map(([status, items]) => jsx(Section, {
+                    title: `${t.status[status] || status} (${items.length})`,
+                    children: jsx('div', { className: 'flex flex-col gap-1', children: items.map((task) => jsx(TaskRow, { task, selected: selected && selected.id === task.id, onSelect: setSelectedId, t }, task.id)) }),
+                  }, status)) : [jsx(EmptyState, { title: t.empty }, 'empty')]),
+                  mutedTasks.length ? jsx(Section, {
+                    title: `${t.mutedGroup} (${mutedTasks.length})`,
+                    children: jsx('div', { className: 'flex flex-col gap-1', children: mutedTasks.map((task) => jsxs('div', {
+                      className: 'flex items-center justify-between gap-2 rounded-md border border-(--ui-stroke-secondary) px-2 py-1 text-xs text-(--ui-text-tertiary)',
+                      children: [
+                        jsxs('span', { className: 'truncate', children: [KIND_ICON[task.kind] || KIND_ICON.other, ' ', task.title] }),
+                        jsx(Button, { size: 'sm', variant: 'ghost', onClick: () => post(`/tasks/${task.id}/action`, { action: 'unmute' }).then(() => onFeedback({ outcome: 'unmuted', text: t.unmuted })).catch(() => {}), children: t.unmute }),
+                      ],
+                    }, task.id)) }),
+                  }, 'muted') : null,
+                ],
               }),
             }),
           }),

@@ -141,7 +141,9 @@ def board() -> dict[str, Any]:
     store, config = _open()
     now_dt = _now()
     open_statuses = tuple(s for s in ("open", "waiting", "needs_user", "in_progress", "snoozed") if s not in TASK_TERMINAL)
-    tasks = [_task_view(store, config, t, now_dt=now_dt) for t in store.list_tasks(statuses=open_statuses, limit=100)]
+    rows = store.list_tasks(statuses=open_statuses, limit=100)
+    tasks = [_task_view(store, config, t, now_dt=now_dt) for t in rows if not t.get("muted")]
+    muted_tasks = [{"id": t["id"], "kind": t.get("kind"), "title": t.get("title"), "status": t.get("status"), "updated_at": t.get("updated_at")} for t in rows if t.get("muted")]
     order = {"needs_user": 0, "in_progress": 1, "open": 2, "waiting": 3, "snoozed": 4}
     tasks.sort(key=lambda t: (order.get(str(t["status"]), 9), -len(t.get("proposals") or []), str(t.get("due_at") or "9")))
     language = str((config.get("owner") or {}).get("language") or "es")
@@ -154,10 +156,10 @@ def board() -> dict[str, Any]:
         "tasks_open": len(tasks), "proposals_pending": sum(1 for t in tasks for p in t["proposals"] if p["status"] in ("pending", "sent")),
         "proposals_waiting": sum(1 for t in tasks for p in t["proposals"] if p["status"] == "waiting"),
         "jobs_running": len(store.list_jobs(statuses=("queued", "running"), limit=20)), "signals_pending": store.pending_signal_count(),
-        "patterns": len(patterns), "preferences": len(preferences), "counts": counts,
+        "patterns": len(patterns), "preferences": len(preferences), "counts": counts, "muted": len(muted_tasks),
     }
     return {"generated_at": _iso(now_dt), "language": language, "mode": config.get("mode"), "trust_level": (config.get("trust") or {}).get("level"),
-            "tasks": tasks, "patterns": patterns, "preferences": preferences, "stats": stats}
+            "tasks": tasks, "muted_tasks": muted_tasks, "patterns": patterns, "preferences": preferences, "stats": stats}
 
 
 @router.get("/tasks/{task_id}")
@@ -233,9 +235,15 @@ class TaskActionBody(BaseModel):
 
 @router.post("/tasks/{task_id}/action")
 def task_action(task_id: str, body: TaskActionBody) -> dict[str, Any]:
-    if body.action not in ("later", "mute", "done"):
-        raise HTTPException(status_code=400, detail="action must be later, mute or done")
+    if body.action not in ("later", "mute", "done", "unmute"):
+        raise HTTPException(status_code=400, detail="action must be later, mute, unmute or done")
     store, config = _open()
+    if body.action == "unmute":
+        try:
+            store.update_task(task_id, now=_iso(_now()), bump_version=False, muted=False)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="task not found")
+        return {"outcome": "unmuted", "text": ""}
     result = act_on_task(store, config, task_id=task_id, action=body.action, actor="desktop", now_dt=_now())
     return {"outcome": result.get("outcome"), "text": result.get("text")}
 

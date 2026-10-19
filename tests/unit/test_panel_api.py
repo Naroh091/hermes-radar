@@ -58,6 +58,12 @@ def test_board_detail_respond_and_preferences_through_the_panel_api(store, tmp_p
     # Task actions, preferences and pattern dismissal.
     assert client.post("/api/plugins/radar/tasks/t1/action", json={"action": "later"}).json()["outcome"] in ("snoozed", "later", "ok") or store.get_task("t1")["status"] == "snoozed"
     assert client.post("/api/plugins/radar/tasks/t1/action", json={"action": "bogus"}).status_code == 400
+    # Muting removes the task from the board and lists it apart; unmuting brings it back.
+    assert client.post("/api/plugins/radar/tasks/t1/action", json={"action": "mute"}).json()["outcome"] == "muted"
+    after = client.get("/api/plugins/radar/board").json()
+    assert after["tasks"] == [] and [m["id"] for m in after["muted_tasks"]] == ["t1"] and after["stats"]["muted"] == 1
+    assert client.post("/api/plugins/radar/tasks/t1/action", json={"action": "unmute"}).json()["outcome"] == "unmuted"
+    assert client.get("/api/plugins/radar/board").json()["muted_tasks"] == []
     saved = client.post("/api/plugins/radar/preferences", json={"instruction": "No avisar de CI", "effect": "digest", "scope": {"sender": "ci@github.com"}}).json()
     assert saved["saved"]["effect"] == "digest" and store.list_preferences(active_only=True)[0]["scope"] == {"sender": "ci@github.com"}
     assert client.post(f"/api/plugins/radar/preferences/{saved['saved']['id']}/forget").json()["disabled"] == saved["saved"]["id"]
