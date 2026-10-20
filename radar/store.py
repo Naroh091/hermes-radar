@@ -1811,6 +1811,44 @@ class Store:
         ).fetchall()
         return [self._decode(row) or {} for row in rows]
 
+    def tasks_for_session(self, session_id: str, *, statuses: tuple[str, ...] | None = None, limit: int = 10) -> list[dict[str, Any]]:
+        """Tasks born from one chat session (``entities.session_id``)."""
+        if not session_id:
+            return []
+        clauses = ["profile_key=?", "owner_id=?", "json_extract(entities_json, '$.session_id')=?"]
+        params: list[Any] = [*self._scope_values, session_id]
+        if statuses:
+            clauses.append("status IN (%s)" % ",".join("?" for _ in statuses))
+            params.extend(statuses)
+        params.append(max(1, min(int(limit), 100)))
+        rows = self.db.execute(
+            f"SELECT * FROM tasks WHERE {' AND '.join(clauses)} ORDER BY updated_at DESC, id LIMIT ?", params
+        ).fetchall()
+        return [self._decode(row) or {} for row in rows]
+
+    def backfill_task_sessions(self, now: str) -> int:
+        """Give tasks born from a chat turn before session ids were recorded their ``entities.session_id``."""
+        rows = self.db.execute(
+            """SELECT t.id AS task_id, json_extract(s.meta_json, '$.session_id') AS session_id
+               FROM tasks t JOIN signals s ON s.profile_key=t.profile_key AND s.owner_id=t.owner_id AND s.id=t.origin_signal_id
+               WHERE t.profile_key=? AND t.owner_id=? AND s.kind='session_turn'
+                 AND json_extract(t.entities_json, '$.session_id') IS NULL""",
+            self._scope_values,
+        ).fetchall()
+        count = 0
+        for row in rows:
+            if not row["session_id"]:
+                continue
+            try:
+                task = self.get_task(row["task_id"])
+                entities = dict(task.get("entities") or {})
+                entities["session_id"] = str(row["session_id"])
+                self.update_task(task["id"], now=now, bump_version=False, entities=entities)
+                count += 1
+            except (KeyError, ValueError, RuntimeError):
+                continue
+        return count
+
     def search_tasks(
         self, query: str, *, kinds: tuple[str, ...] | None = None, limit: int = 5, open_only: bool = True,
     ) -> list[dict[str, Any]]:

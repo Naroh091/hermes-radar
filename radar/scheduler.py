@@ -92,7 +92,14 @@ def sync_configured_sources(store: Store, config: dict[str, Any], now: datetime 
 
 def ensure_routines(store: Any, now: str) -> None:
     """Standing timers that do not belong to a source: the daily pattern mining (first run an hour after
-    install, then every 24 h from each run; an existing timer keeps its own schedule)."""
+    install, then every 24 h from each run; an existing timer keeps its own schedule). Also repairs tasks
+    born from a chat before session ids were recorded, so they stay out of live conversations."""
+    try:
+        fixed = store.backfill_task_sessions(now)
+        if fixed:
+            log.info("radar: %d task(s) now remember their chat session", fixed)
+    except Exception as exc:
+        log.debug("task session backfill skipped: %s", exc)
     try:
         if any(row.get("id") == "routine:pattern-mining" for row in store.list_followups(limit=100)):
             return

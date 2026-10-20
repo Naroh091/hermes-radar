@@ -22,7 +22,8 @@ def _turn(store, signal_id, at, user_text, assistant_text=""):
 
 
 def test_active_session_bundles_wait_and_their_tasks_stay_silent_without_parallel_jobs(store, tmp_path):
-    cfg = active_config(trust={"level": "balanced", "overrides": {}, "auto_external": []})
+    # session_auto_jobs lets this test exercise the live-session guard alone; by default no job runs for a chat-born task.
+    cfg = active_config(trust={"level": "balanced", "overrides": {}, "auto_external": []}, observation={"session_auto_jobs": True})
     verify_destination(store)
     store.ensure_local_observation_source(NOW_S, 30)
     _turn(store, "turn1", "2026-10-19T09:55:00Z", "ok, móntalo en la mariadb que hay nativa y vigila el dump de The Hub", "Parte 1 lista. Parte 2 en marcha: el dump va por 5,8 GB.")
@@ -32,7 +33,7 @@ def test_active_session_bundles_wait_and_their_tasks_stay_silent_without_paralle
         checklist=[], proposals=[{"title": "Vigilar el dump de The Hub", "rationale": "", "action_class": "read", "operation": "investigate", "when": "", "urgency": "normal", "options": [{"id": "do", "label": "Sí"}]}],
         notify={"disposition": "notify_now", "reason": "x"}, message="Hay un dump en marcha.", escalation={"decision": "handle", "why": "x"},
     )
-    llm = FakeLlm({"radar.extract": [extract_answer(category="work_item", proposed_reply="Hola, he vigilado el dump…")], "radar.plan": [plan, plan]})
+    llm = FakeLlm({"radar.extract": [extract_answer(category="work_item", proposed_reply="Hola, he vigilado el dump…", conversation_state="open")], "radar.plan": [plan, plan]})
     rt = Runtime(FakeContext(cfg, llm=llm), store, cfg, worker_id="w", clock=lambda: NOW, hermes_home=str(tmp_path))
     bundle = store.claim_signal_bundles(NOW_S, "2026-10-19T10:10:00Z", 5)[0]
     # While the conversation is live nothing is processed: the bundle waits for the quiet window.
@@ -60,7 +61,7 @@ def test_active_session_bundles_wait_and_their_tasks_stay_silent_without_paralle
     assert _auto_eligible(rt, proposal, store.get_task(task["id"])) is False
     rt.clock = lambda: now2 + timedelta(minutes=40)
     assert _auto_eligible(rt, proposal, store.get_task(task["id"])) is True
-    assert "session_turn signals is a conversation" in reason.PLAN_PROMPT
+    assert "A conversation bundle is a chat the owner had with their agent" in reason.PLAN_PROMPT
 
 
 def test_apply_silences_notices_for_tasks_whose_session_is_live(store):

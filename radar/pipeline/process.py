@@ -11,6 +11,7 @@ from ..llm import BudgetExhausted, LlmError
 from ..models import TASK_TERMINAL
 from ..trust import may_auto_run
 from .recall import build_query, recall_summary
+from .conversation import is_conversation, transcript, view as conversation_view
 from .sessions import quiet_minutes, session_active, session_of, task_session_active
 from . import act, correlate, extract as extract_step, reason
 from .triage import triage_bundle
@@ -83,13 +84,12 @@ async def process_bundle(rt: Any, bundle: dict[str, Any], now_dt: datetime) -> d
     summary: dict[str, Any] = {"group": bundle["group_key"], "signals": len(signals)}
     existing_task = None
     kept = signals
-    if signals and all(s.get("kind") == "session_turn" for s in signals):
-        sid = session_of(signals)
-        if sid and session_active(store, sid, now_dt, config):
-            # The conversation is still doing the work: learn from it once it goes quiet.
-            store.defer_signals(signals, next_attempt_at=iso(now_dt + timedelta(minutes=quiet_minutes(config))), error="session_active", now=now)
-            summary["deferred"] = "session_active"
-            return summary
+    session_id = session_of(signals) if is_conversation(signals) else ""
+    if session_id and session_active(store, session_id, now_dt, config):
+        # The conversation is still doing the work: learn from it once it goes quiet.
+        store.defer_signals(signals, next_attempt_at=iso(now_dt + timedelta(minutes=quiet_minutes(config))), error="session_active", now=now)
+        summary["deferred"] = "session_active"
+        return summary
     if all(s.get("kind") in ("job_result", "cron_result") for s in signals) and signals:
         task_id = (signals[0].get("meta") or {}).get("task_id")
         if task_id:
@@ -120,15 +120,23 @@ async def process_bundle(rt: Any, bundle: dict[str, Any], now_dt: datetime) -> d
             extracted = _synthetic_extract_from_job(kept[-1], existing_task)
             candidates = []
         else:
+            conversation = None
+            if session_id:
+                # The whole session is the unit of judgement: earlier turns come along as context.
+                conversation = conversation_view(session_id, kept, transcript(store, session_id, {s["id"] for s in kept}))
             extracted = await extract_step.extract(
                 gate, kept, owner=owner, now=now, facts=facts, open_tasks=store.open_task_summaries(), subject_id=kept[0]["id"],
+                conversation=conversation,
             )
-            if not extracted.get("relevant") or extracted.get("category") == "noise":
-                store.finish_signals(kept, status="ignored", reason="model_noise", now=now, extracts={s["id"]: extracted for s in kept})
+            resolved = session_id and extracted.get("conversation_state") == "resolved"
+            session_tasks = store.tasks_for_session(session_id, statuses=correlate.OPEN_STATUSES) if session_id else []
+            if (not extracted.get("relevant") or extracted.get("category") == "noise") and not (resolved and session_tasks):
+                reason_code = "conversation_resolved" if resolved else "model_noise"
+                store.finish_signals(kept, status="ignored", reason=reason_code, now=now, extracts={s["id"]: extracted for s in kept})
                 _apply_retention(store, kept, keep=False, config=config, now_dt=now_dt)
                 summary["result"] = "noise"
                 return summary
-            candidates = correlate.candidate_tasks(store, extracted)
+            candidates = correlate.candidate_tasks(store, extracted, session_id=session_id)
         if existing_task is not None:
             existing_task = task_context(store, existing_task)
         recalled = await recall_job
@@ -147,6 +155,12 @@ async def process_bundle(rt: Any, bundle: dict[str, Any], now_dt: datetime) -> d
         recall_job.cancel()
         store.defer_signals(kept, next_attempt_at=iso(now_dt + timedelta(minutes=RETRY_MINUTES)), error=str(exc)[:200], now=now)
         summary["deferred"] = str(exc)[:100]
+        return summary
+    if session_id and extracted.get("conversation_state") == "resolved" and planned["task_match"]["decision"] in ("new", "none"):
+        # Nothing of a finished conversation becomes a task; it only closes what the same session opened.
+        store.finish_signals(kept, status="ignored", reason="conversation_resolved", now=now, extracts={s["id"]: extracted for s in kept})
+        _apply_retention(store, kept, keep=False, config=config, now_dt=now_dt)
+        summary["result"] = "resolved"
         return summary
     owner_followup = existing_task is not None and _owner_approved_job(store, kept[-1])
     result = act.apply(
@@ -247,6 +261,8 @@ def _auto_run(rt: Any, result: Any, now_dt: datetime) -> int:
 def _auto_eligible(rt: Any, proposal: dict[str, Any], task: dict[str, Any]) -> bool:
     if proposal.get("operation_id") in ("check", "inform"):
         return False
+    if (task.get("entities") or {}).get("session_id") and not (rt.config.get("observation") or {}).get("session_auto_jobs", False):
+        return False  # work that began in a chat stays with the chat: Radar offers, the owner decides
     if task_session_active(rt.store, task, rt.clock(), rt.config):
         return False  # the chat session is on it; no parallel work
     trust = rt.config.get("trust") or {}

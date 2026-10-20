@@ -57,7 +57,11 @@ Si no pudo arrancar, la propuesta queda en estado `waiting` (en `/radar status` 
 
 ### Conversaciones en curso
 
-Lo que hablas con el agente en una sesión lo resuelve esa sesión. Radar solo aprende de ella cuando lleva media hora en silencio (`observation.session_quiet_minutes`), registra lo que la conversación se comprometió a hacer y, si vuelves a esa sesión, se aparta: sin avisos, sin jobs paralelos, con las revisiones pospuestas. Lo que la sesión deje a medias sí lo retoma después.
+Lo que hablas con el agente en una sesión lo resuelve esa sesión. Radar solo aprende de ella cuando lleva media hora en silencio (`observation.session_quiet_minutes`) y la lee entera, no turno a turno: lo que una pregunta abre lo cierra la respuesta siguiente, y lo que el agente dio por hecho está hecho. Una conversación terminada no deja tarea (y cierra sin avisar la que ella misma hubiera abierto); una abierta registra solo lo que quedó pendiente y para quién; una aplazada con recordatorio o cron se sigue con esa fecha y nada más. Si vuelves a esa sesión, Radar se aparta: sin avisos, sin jobs paralelos, con las revisiones pospuestas. Lo que empezó en un chat no lanza jobs solo (`observation.session_auto_jobs`): si queda algo pendiente, te lo ofrece en el resumen. Los tokens o contraseñas que pegues en el chat se enmascaran antes de guardarse.
+
+### Urgencia y resúmenes
+
+No todo merece interrumpirte. El planificador juzga la urgencia de cada asunto: `now` llega al momento (seguridad, dinero bloqueado, plazo en horas, alguien esperando hoy, servicio caído); `today` entra en el siguiente resumen del día; `this_week` y `whenever` esperan al resumen de la mañana. Las franjas de resumen se fijan en `notifications.digest_times` (hora local; por defecto 09:00, 14:00 y 19:00). Lo que ya sabes porque lo hiciste tú (un correo que escribiste, lo que decidiste en el chat) no se te vuelve a contar.
 
 ### Quién actúa: escalado
 

@@ -9,6 +9,7 @@ import logging
 
 from ..i18n import t
 from ..models import canonical_hash
+from .cadence import digest_due
 from .context import thread_context
 from .notice import DRAFT_INLINE, build_digest, build_notice
 from ..render.report import render_task_report
@@ -85,7 +86,7 @@ def dispatch(store: Any, config: dict[str, Any], now_dt: datetime) -> dict[str, 
             continue
         message = next((p.get("params", {}).get("message") for p in items if p.get("params", {}).get("message")), "")
         payload = build_notice(task, items, language=language, message=message, context=thread_context(store, task["id"], config, now_dt=now_dt))
-        payload["urgent"] = any(p.get("urgency") == "high" for p in items)
+        payload["urgent"] = any(_urgent(p) for p in items)
         payload["exempt"] = exempt
         draft = next((p.get("params", {}).get("draft") for p in items if p.get("params", {}).get("draft")), "")
         if draft and len(draft) > DRAFT_INLINE:
@@ -106,9 +107,7 @@ def dispatch(store: Any, config: dict[str, Any], now_dt: datetime) -> dict[str, 
             counts["proposals"] += len(items)
     digest_items = [p for p in pending if p.get("batch_key") == "digest"]
     if digest_items and sent_today + capped < limit:
-        minutes = int(notifications.get("batch_minutes", 120))
-        last = _last_digest_at(store)
-        if last is None or last + timedelta(minutes=minutes) <= now_dt:
+        if digest_due(now_dt, _last_digest_at(store), config):
             groups = _group_by_task(store, digest_items)
             if groups:
                 contexts = {task["id"]: ctx for task, _ in groups if (ctx := thread_context(store, task["id"], config, now_dt=now_dt))}
@@ -124,6 +123,12 @@ def dispatch(store: Any, config: dict[str, Any], now_dt: datetime) -> dict[str, 
                     counts["digests"] += 1
                     counts["proposals"] += len(payload["proposal_ids"])
     return counts
+
+
+def _urgent(proposal: dict[str, Any]) -> bool:
+    """A notice crosses quiet hours only for a high-urgency step the planner judged could not wait."""
+    params = proposal.get("params") or {}
+    return proposal.get("urgency") == "high" and str(params.get("urgency") or "now") == "now"
 
 
 def draft_document(task_id: str, text: str, *, language: str, now_dt: datetime) -> dict[str, str] | None:

@@ -37,6 +37,9 @@ def setup_cli(parser: argparse.ArgumentParser) -> None:
     replay.add_argument("signal_id")
     tasks = actions.add_parser("tasks", help="List tracked tasks")
     tasks.add_argument("--all", action="store_true")
+    task = actions.add_parser("task", help="Act on one task as the owner would from a notice: done, later, mute, unmute")
+    task.add_argument("task_id")
+    task.add_argument("task_action", choices=["done", "later", "mute", "unmute"])
     explain = actions.add_parser("explain", help="Explain one task; --html writes a standalone report")
     explain.add_argument("task_id")
     explain.add_argument("--html", action="store_true")
@@ -63,7 +66,7 @@ def _print(value: Any) -> None:
 def command(ctx, args: argparse.Namespace) -> int:
     action = getattr(args, "radar_action", None)
     if not action:
-        print("Usage: hermes radar {status|validate|run-once|discover|setup|sync|replay|tasks|explain|gmail|import|signals}")
+        print("Usage: hermes radar {status|validate|run-once|discover|setup|sync|replay|tasks|task|explain|gmail|import|signals}")
         return 2
     try:
         if action == "discover":
@@ -134,6 +137,15 @@ def command(ctx, args: argparse.Namespace) -> int:
                              "missing": [c.get("item") for c in task.get("checklist") or [] if isinstance(c, dict) and c.get("status") == "missing"],
                              "proposals": [{"id": p["id"], "title": p["title"], "status": p["status"], "class": p["action_class"]} for p in proposals]})
             _print(rows)
+            return 0
+        if action == "task":
+            from .delivery.responses import act_on_task
+
+            full_id = next((t["id"] for t in store.list_tasks(limit=500) if t["id"] == args.task_id or t["id"].startswith(args.task_id)), None)
+            if full_id is None:
+                _print({"error": "unknown_task"})
+                return 1
+            _print(act_on_task(store, cfg, task_id=full_id, action=args.task_action, actor="cli", now_dt=datetime.now(timezone.utc)))
             return 0
         if action == "explain":
             from . import explain_tool

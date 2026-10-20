@@ -20,7 +20,8 @@ CONFIG_DEFAULTS: dict[str, Any] = {
         "allow_groups": False,
         "verified": False,
     },
-    "observation": {"local_sessions": False, "historical_import": False, "state_db_poll_seconds": 0, "debounce_seconds": 120, "session_quiet_minutes": 30},
+    "observation": {"local_sessions": False, "historical_import": False, "state_db_poll_seconds": 0, "debounce_seconds": 120, "session_quiet_minutes": 30,
+                    "session_auto_jobs": False},
     "context": {"memory": True, "sessions": True, "timeout_seconds": 45, "max_chars": 1500, "session_results": 3, "memory_tool": ""},
     "scheduler": {"tick_seconds": 60, "max_concurrent_checks": 2},
     "notifications": {
@@ -29,6 +30,7 @@ CONFIG_DEFAULTS: dict[str, Any] = {
         "quiet_end": "08:00",
         "daily_limit": 3,
         "batch_minutes": 30,
+        "digest_times": ["09:00", "14:00", "19:00"],
         "reminder_cooldown_hours": 24,
     },
     "limits": {
@@ -75,10 +77,10 @@ CONFIG_DEFAULTS: dict[str, Any] = {
 _NESTED_KEYS = {
     "owner": {"id", "timezone", "language"},
     "destination": {"platform", "gateway_connection_ref", "resolution", "address", "owner_platform_id", "allow_groups", "verified"},
-    "observation": {"local_sessions", "historical_import", "state_db_poll_seconds", "debounce_seconds", "session_quiet_minutes"},
+    "observation": {"local_sessions", "historical_import", "state_db_poll_seconds", "debounce_seconds", "session_quiet_minutes", "session_auto_jobs"},
     "context": {"memory", "sessions", "timeout_seconds", "max_chars", "session_results", "memory_tool"},
     "scheduler": {"tick_seconds", "max_concurrent_checks"},
-    "notifications": {"enabled", "quiet_start", "quiet_end", "daily_limit", "batch_minutes", "reminder_cooldown_hours"},
+    "notifications": {"enabled", "quiet_start", "quiet_end", "daily_limit", "batch_minutes", "digest_times", "reminder_cooldown_hours"},
     "limits": {"events_per_source_cycle", "checks_per_day", "llm_calls_per_day", "llm_input_tokens", "llm_output_tokens", "jobs_per_day", "max_bundles_per_tick", "signal_attempts"},
     "retention": {"observations_days", "results_days", "audit_days", "snippet_chars", "full_content_days", "full_content_kinds", "signals_days"},
     "mutations": {"enabled", "require_per_action_consent"},
@@ -260,7 +262,7 @@ def validate_config(value: Any) -> tuple[bool, list[str]]:
 
     observation = value.get("observation")
     if isinstance(observation, dict):
-        for field in ("local_sessions", "historical_import"):
+        for field in ("local_sessions", "historical_import", "session_auto_jobs"):
             if not isinstance(observation.get(field), bool):
                 errors.append(f"observation.{field} must be boolean")
         for field in ("state_db_poll_seconds", "debounce_seconds", "session_quiet_minutes"):
@@ -297,6 +299,9 @@ def validate_config(value: Any) -> tuple[bool, list[str]]:
                     pass
             if not valid_time:
                 errors.append(f"notifications.{field} must be HH:MM")
+        times = notifications.get("digest_times")
+        if not isinstance(times, list) or any(not isinstance(t, str) or len(t) != 5 or t[2] != ":" or not t[:2].isdigit() or not t[3:].isdigit() for t in times):
+            errors.append("notifications.digest_times must be an array of HH:MM strings (empty for a batch_minutes cadence)")
         if notifications.get("enabled") is True:
             if value.get("mode") != "active":
                 errors.append("notifications require active mode")

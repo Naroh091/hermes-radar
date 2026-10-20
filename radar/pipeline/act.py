@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
+from ..delivery.cadence import next_delivery
 from ..i18n import t
 from ..trust import may_auto_run
 from .sessions import session_of, task_session_active
@@ -200,6 +201,24 @@ def remember_pr(store: Any, task_id: str, url: str, now: str) -> None:
         pass
 
 
+def owner_addresses(config: dict[str, Any]) -> set[str]:
+    out: set[str] = set()
+    for source in config.get("sources") or []:
+        if isinstance(source, dict) and source.get("kind") == "gmail" and source.get("address"):
+            out.add(str(source["address"]).strip().lower())
+    return out
+
+
+def owner_authored(signals: list[dict[str, Any]], config: dict[str, Any]) -> bool:
+    """True when the newest email in the bundle was written by the owner: they already know its content."""
+    emails = [s for s in signals if s.get("kind") == "email"]
+    if not emails:
+        return False
+    sender = str((emails[-1].get("meta") or {}).get("sender") or "").lower()
+    address = sender[sender.rfind("<") + 1:].rstrip(">").strip() if "<" in sender else sender.strip()
+    return bool(address) and address in owner_addresses(config)
+
+
 def _has_correspondent(store: Any, task_id: str) -> bool:
     """True when the task has someone to answer: an email thread or a GitHub issue/PR."""
     try:
@@ -325,18 +344,25 @@ def apply(
         info_complete=True, muted=bool(task.get("muted")),
     )
     disposition = attention.disposition
+    urgency = str(plan["notify"].get("urgency") or "today")
+    if disposition == "notify_now" and attention.reason == "model_evaluation" and urgency != "now":
+        disposition = "digest"  # only what cannot wait interrupts; the rest is grouped
     if task_session_active(store, task, now_dt, config) and not owner_followup:
         disposition = "silent"  # the owner is already in that conversation
     escalation = str((plan.get("escalation") or {}).get("decision") or "ask")
+    terminal = task.get("status") in TASK_TERMINAL
+    conversation = bool(session_of(signals))
+    if (conversation or owner_authored(signals, config)) and (terminal or escalation == "inform") and not owner_followup:
+        disposition = "silent"  # the owner lived it or wrote it: nothing to report back
     read_steps = [p for p in plan.get("proposals") or [] if p.get("action_class") == "read" and p.get("operation") not in ("check", "inform")]
     if (escalation == "handle" and read_steps and not owner_followup and disposition != "silent"
             and may_auto_run(config.get("trust") or {}, "read", kind=task.get("kind"), operation_id=read_steps[0].get("operation") or None)):
         disposition = "silent"  # the assistant looks first; the result re-plans and decides inform or ask
     inform_only = escalation == "inform" and not (plan.get("proposals") or asks) and disposition != "silent" and bool(plan.get("message"))
     proposal_ids: list[str] = []
-    terminal = task.get("status") in TASK_TERMINAL
     if not terminal or inform_only:  # news about a task that just completed still reaches the owner
         batch_key = "now" if owner_followup else {"notify_now": "now", "digest": "digest", "silent": "silent"}[disposition]
+        slot = next_delivery(now_dt, "today" if urgency == "now" else urgency, config) if batch_key == "digest" else None
         candidates: list[dict[str, Any]] = []
         for check in asks:
             candidates.append({
@@ -362,6 +388,8 @@ def apply(
                 continue
             attempted += 1
             when = parse_iso(item.get("when"))
+            if slot is not None and (when is None or when < slot):
+                when = slot  # grouped news waits for its summary slot
             deliver_after = iso(when) if when and when > now_dt else ""
             ttl = timedelta(hours=SCHEDULED_TTL_HOURS) if deliver_after else timedelta(hours=PROPOSAL_TTL_HOURS)
             expires_at = iso((when if deliver_after else now_dt) + ttl)
@@ -371,7 +399,8 @@ def apply(
                 proposal_id=str(uuid4()), task_id=task_id, title=item["title"], reason_text=item.get("rationale") or "",
                 action_class=item.get("action_class", "read"), operation_id=item.get("operation") or None,
                 params={"when": item.get("when", ""), "deliver_after": deliver_after, "rationale": item.get("rationale", ""),
-                        "message": plan.get("message", ""), **({"owner_followup": True} if owner_followup else {}),
+                        "message": plan.get("message", ""), "urgency": urgency, "importance": str(plan["notify"].get("importance") or "normal"),
+                        **({"owner_followup": True} if owner_followup else {}),
                         **({"draft": draft["text"], "draft_ref": draft.get("ref", "")} if draft else {})},
                 options=options, urgency=item.get("urgency", "normal"), expires_at=expires_at, fingerprint=fingerprint,
                 now=now, batch_key=batch_key,
@@ -392,7 +421,7 @@ def apply(
     store.add_audit(
         audit_id=str(uuid4()), event_type="pipeline", subject_type="task", subject_id=task_id,
         correlation_id=signals[0]["id"] if signals else None, actor_kind="scheduler", decision_code=decision,
-        metadata={"disposition": disposition, "attention": attention.reason, "proposals": len(proposal_ids),
+        metadata={"disposition": disposition, "attention": attention.reason, "urgency": urgency, "proposals": len(proposal_ids),
                   "suppressed": suppressed, "status": task.get("status"), "created": created}, now=now,
     )
     return ActResult(

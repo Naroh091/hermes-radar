@@ -6,6 +6,8 @@ from typing import Any
 
 from ..i18n import language_name
 from ..llm import LlmError, LlmGate
+from ..redact import redact
+from .conversation import CONVERSATION_STATES
 from .schemas import CATEGORIES, DISPOSITIONS, EXTRACT_SCHEMA, RISK_FLAGS
 
 MAX_BODY = 6000
@@ -24,6 +26,20 @@ workflow_run, deployment_status, release), action, number, actor, ref and url: a
 assigned or reviewed is a work_item for the owner when they are involved; a failed workflow_run on the
 owner's branch is a check; a merge, a deployment outcome or a release usually advances or completes
 what was tracked; routine pushes by others with nothing to do are noise.
+
+A conversation bundle (key "conversation") is the owner's own chat with their agent, oldest turn first;
+turns marked new are the ones not yet evaluated, the rest is context. Judge the conversation as a
+whole, never a turn on its own: a request opened in one turn is usually done by a later one, a
+question is answered by the next reply, and work the agent reports as done and verified is done.
+conversation_state: "resolved" when everything the owner asked was answered or done and nothing was
+left for later; "open" when the agent or the owner still has something to do that the chat did not
+finish (say what in expectations, and who); "deferred" when it was explicitly left for later with a
+reminder, a cron job or a date (track it with that date; nothing to do now). A resolved conversation is
+noise (relevant=false), however long or important it was: the owner lived through it. Never track a
+question the agent answered, a decision the owner already took, or work the agent completed. Credentials
+pasted into a chat are never recorded. For any other bundle, conversation_state is "not_a_conversation".
+A message written by the owner themselves (their reply in a thread, their own confirmation) tells you
+what the owner already knows and did: it may advance or complete a task but never needs reporting back.
 
 Decide whether the bundle reveals something the owner has started, is waiting for, or should know:
 a trip, a purchase, a work item (bug report, request, review), a commitment or deadline, a routine,
@@ -53,7 +69,7 @@ Return only JSON matching the schema."""
 def _clip(value: Any, limit: int) -> str:
     text = value if isinstance(value, str) else ""
     text = " ".join(text.split())
-    return text[:limit]
+    return redact(text[:limit])
 
 
 def signal_view(signal: dict[str, Any], *, budget: int) -> dict[str, Any]:
@@ -83,11 +99,11 @@ def signal_view(signal: dict[str, Any], *, budget: int) -> dict[str, Any]:
 
 def build_input(
     signals: list[dict[str, Any]], *, owner: dict[str, Any], now: str, facts: list[dict[str, Any]],
-    open_tasks: list[dict[str, Any]],
+    open_tasks: list[dict[str, Any]], conversation: dict[str, Any] | None = None,
 ) -> str:
     budget = MAX_TOTAL
     views = []
-    for signal in signals:
+    for signal in [] if conversation else signals:
         view = signal_view(signal, budget=max(1000, budget))
         budget -= len(json.dumps(view, ensure_ascii=False))
         views.append(view)
@@ -103,6 +119,8 @@ def build_input(
         ],
         "signals": views,
     }
+    if conversation:
+        payload["conversation"] = conversation
     return json.dumps(payload, ensure_ascii=False, sort_keys=True)
 
 
@@ -160,17 +178,20 @@ def validate_extract(raw: Any) -> dict[str, Any]:
     out["proposed_reply"] = str(raw.get("proposed_reply") or "")[:4000]
     out["keep_full_content"] = bool(raw.get("keep_full_content", False))
     out["needs_thread"] = bool(raw.get("needs_thread", False))
+    state = raw.get("conversation_state")
+    out["conversation_state"] = state if state in CONVERSATION_STATES else "not_a_conversation"
     return out
 
 
 async def extract(
     gate: LlmGate, signals: list[dict[str, Any]], *, owner: dict[str, Any], now: str,
     facts: list[dict[str, Any]], open_tasks: list[dict[str, Any]], subject_id: str | None = None,
+    conversation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     prompt = EXTRACT_PROMPT.format(language=language_name(owner.get("language")))
     raw = await gate.structured(
         "extract", instructions=prompt,
-        input_text=build_input(signals, owner=owner, now=now, facts=facts, open_tasks=open_tasks),
+        input_text=build_input(signals, owner=owner, now=now, facts=facts, open_tasks=open_tasks, conversation=conversation),
         schema=EXTRACT_SCHEMA, purpose="radar.extract", subject_id=subject_id,
     )
     return validate_extract(raw)

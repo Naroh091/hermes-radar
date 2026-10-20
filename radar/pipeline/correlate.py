@@ -19,6 +19,14 @@ def _entities_text(entities: dict[str, Any]) -> str:
     return " ".join(parts)
 
 
+def _identifier_text(entities: dict[str, Any]) -> str:
+    parts: list[str] = [str(i.get("value", "")) for i in entities.get("identifiers") or [] if isinstance(i, dict)]
+    for key in ("repo", "url"):
+        if entities.get(key):
+            parts.append(str(entities[key]))
+    return " ".join(parts)
+
+
 def compact_task(task: dict[str, Any]) -> dict[str, Any]:
     checklist = task.get("checklist") or []
     missing = [c.get("item") for c in checklist if isinstance(c, dict) and c.get("status") == "missing"]
@@ -31,13 +39,26 @@ def compact_task(task: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def candidate_tasks(store: Any, extract: dict[str, Any], *, limit: int = 6) -> list[dict[str, Any]]:
-    query = " ".join([extract.get("title", ""), extract.get("summary", ""), _entities_text(extract.get("entities") or {})])
+OPEN_STATUSES = ("open", "waiting", "needs_user", "in_progress", "snoozed")
+
+
+def candidate_tasks(store: Any, extract: dict[str, Any], *, limit: int = 6, session_id: str = "") -> list[dict[str, Any]]:
+    """Open tasks the bundle may refer to. A conversation bundle starts with the tasks born from the
+    same session and never gets the same-kind fallback: sharing a kind is not sharing a subject."""
+    entities = extract.get("entities") or {}
+    if session_id:
+        # Words shared with an unrelated task mean nothing here; only identifiers, repos and links do.
+        query = " ".join(_identifier_text(entities).split())
+    else:
+        query = " ".join([extract.get("title", ""), extract.get("summary", ""), _entities_text(entities)])
     found: dict[str, dict[str, Any]] = {}
-    for task in store.search_tasks(query, limit=limit):
-        found[task["id"]] = task
+    if session_id:
+        for task in store.tasks_for_session(session_id, statuses=OPEN_STATUSES, limit=limit):
+            found[task["id"]] = task
+    for task in store.search_tasks(query, limit=limit) if query else []:
+        found.setdefault(task["id"], task)
     category = extract.get("category")
-    if category and category != "noise":
-        for task in store.list_tasks(statuses=("open", "waiting", "needs_user", "in_progress", "snoozed"), limit=4, kinds=(category,)):
+    if category and category != "noise" and not session_id:
+        for task in store.list_tasks(statuses=OPEN_STATUSES, limit=4, kinds=(category,)):
             found.setdefault(task["id"], task)
     return [compact_task(task) for task in list(found.values())[:limit]]

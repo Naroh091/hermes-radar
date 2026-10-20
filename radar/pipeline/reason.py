@@ -7,7 +7,7 @@ from typing import Any
 from ..i18n import language_name
 from ..llm import LlmError, LlmGate
 from .checklists import template_for
-from .schemas import ACTION_CLASSES, DISPOSITIONS, PLAN_SCHEMA, TASK_KINDS
+from .schemas import ACTION_CLASSES, DISPOSITIONS, PLAN_SCHEMA, TASK_KINDS, URGENCIES
 
 PLAN_PROMPT = """You maintain the long-lived tasks of one owner. You receive an extracted bundle of signals (or an
 existing task to review), candidate open tasks, the owner's facts and preferences, the trust level and a
@@ -19,7 +19,10 @@ note when it matters, and treat them as possibly stale.
 1. task_match: "new" when the bundle starts something not yet tracked; "advances", "completes" or
    "contradicts" when it refers to a candidate (use its exact id; match only when dates, identifiers or
    threads genuinely coincide); "none" when there is no task to track. When reviewing an existing task,
-   use "advances" with its id.
+   use "advances" with its id. A conversation bundle (bundle.conversation_state is resolved, open or
+   deferred) matches only a candidate born from the same session (same entities.session_id) or one that
+   names the same identifier (PR number, order id, event id); never one that merely shares a topic or a
+   kind. A resolved conversation completes its own task (status done) and starts nothing new.
 2. task: the state after applying the bundle: kind, title, summary, status (open; waiting for a third
    party; needs_user when only the owner can decide; in_progress; done when the expectation is fulfilled;
    abandoned when the owner said so), due_at (ISO or ""), next_review_at (ISO or "": when it is worth
@@ -51,17 +54,27 @@ note when it matters, and treat them as possibly stale.
    Do not propose what is already done. existing_task.declined_by_owner lists steps the owner refused:
    never propose them again, nor rephrased variants, unless new evidence changes the situation. One
    investigation at a time: if recent_proposals shows a step still executing, do not add another read step.
-6. notify: notify_now to interrupt the owner now (a decision, a gap with a deadline, a risk, a check that
-   needs an answer); digest for useful progress that can wait; silent when there is nothing to decide or
-   learn. A fulfilled expectation is usually digest.
+6. notify: judge urgency and importance before deciding how to reach the owner. urgency: "now" only when
+   waiting costs something real (a security alert, a blocked payment, a deadline within hours, a person
+   waiting for an answer today, a service down); "today" when it should be seen before the day ends (a
+   review requested, a bug to triage, a question from a colleague); "this_week" when it can sit in a
+   morning summary (an invitation to decide, a renewal weeks away, progress on something tracked);
+   "whenever" for news with nothing to do. importance: high when the owner's money, security, commitments
+   or reputation are at stake, normal for ordinary work, low for routine information. disposition:
+   notify_now only with urgency now; digest otherwise when there is something useful to decide or learn
+   (it is grouped and delivered at the next summary slot for that urgency); silent when there is nothing to
+   decide or learn, when the owner already knows (they wrote the message, took the decision, lived the
+   conversation) or when the fulfilled expectation needs no comment. Do not interrupt to confirm what the
+   owner did; do not interrupt twice for the same thing.
 7. message: one to three sentences for the owner (under 500 characters): what is going on and why it matters.
-   A bundle of session_turn signals is a conversation the owner is having with their agent: that agent
-   already acts and reports inside the chat. Record what the conversation committed to (expectations, dates,
-   follow-ups the agent promised) and nothing else: never propose investigating in parallel, never propose a
-   reply (there is no third party), never ask what the chat is already handling; checklist items that assume
-   a reporter or a deployment (a reply to whoever reported it, verified in production) are not_applicable
-   unless the conversation says so. Proposals for such a task only make sense once the session is over and
-   something it promised is still undone.
+   A conversation bundle is a chat the owner had with their agent: that agent already acts and reports
+   inside it, and the owner was there. Record only what the conversation left pending for later
+   (expectations with dates, follow-ups the agent promised, decisions deferred with a reminder) and nothing
+   else: never propose investigating in parallel, never propose a reply (there is no third party), never
+   inform the owner of what their own chat did or decided, never ask what the chat is already handling;
+   checklist items that assume a reporter or a deployment (a reply to whoever reported it, verified in
+   production) are not_applicable unless the conversation says so. Proposals for such a task only make sense
+   once the session is over and something it promised is still undone, and they wait for the owner's answer.
 8. escalation: who should act next. "handle" when the assistant can find out or sort it out by itself with
    read steps before bothering the owner (open the notification, read the message, check whether the
    payments arrived, look up the order): propose that read step first and nothing is sent until its result
@@ -173,6 +186,10 @@ def validate_plan(raw: Any) -> dict[str, Any]:
     disposition = notify.get("disposition", "digest")
     if disposition not in DISPOSITIONS:
         raise LlmError(f"notify.disposition out of range: {disposition!r}")
+    urgency = notify.get("urgency")
+    if urgency not in URGENCIES:
+        urgency = {"notify_now": "now", "digest": "today", "silent": "whenever"}[disposition]
+    importance = notify.get("importance") if notify.get("importance") in ("high", "normal", "low") else "normal"
     escalation = raw.get("escalation") if isinstance(raw.get("escalation"), dict) else {}
     escalation_decision = escalation.get("decision") if escalation.get("decision") in ("handle", "inform", "ask") else "ask"
     return {
@@ -191,7 +208,7 @@ def validate_plan(raw: Any) -> dict[str, Any]:
             for c in (raw.get("checks") or []) if isinstance(c, dict) and c.get("description")
         ][:5],
         "proposals": proposals[:3],
-        "notify": {"disposition": disposition, "reason": _clip_words(notify.get("reason"), 300)},
+        "notify": {"disposition": disposition, "urgency": urgency, "importance": importance, "reason": _clip_words(notify.get("reason"), 300)},
         "message": _clip_words(raw.get("message"), 800),
         "escalation": {"decision": escalation_decision, "why": _clip_words(escalation.get("why"), 300)},
     }

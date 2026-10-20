@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
+from ..redact import redact
 from .base import SourceAdapter, SyncResult, fingerprint, iso, parse_iso
 
 log = logging.getLogger(__name__)
@@ -37,8 +38,8 @@ def record_turn(store: Any, config: dict[str, Any], event: dict[str, Any], now_d
     platform = str(event.get("platform") or "")
     if platform in EXCLUDED_PLATFORMS:
         return False
-    user_text = _text(event.get("user_message")).strip()
-    assistant_text = _text(event.get("assistant_response")).strip()
+    user_text = redact(_text(event.get("user_message")).strip())
+    assistant_text = redact(_text(event.get("assistant_response")).strip())
     if not user_text:
         return False
     session_id = str(event.get("session_id") or "")
@@ -65,7 +66,7 @@ def record_turn(store: Any, config: dict[str, Any], event: dict[str, Any], now_d
 
 
 def record_subagent(store: Any, config: dict[str, Any], event: dict[str, Any], now_dt: datetime) -> bool:
-    summary = _text(event.get("child_summary")).strip()
+    summary = redact(_text(event.get("child_summary")).strip())
     if not summary:
         return False
     now = iso(now_dt)
@@ -75,7 +76,7 @@ def record_subagent(store: Any, config: dict[str, Any], event: dict[str, Any], n
     child = str(event.get("child_session_id") or "")
     meta = {
         "session_id": parent, "child_session_id": child, "role": str(event.get("child_role") or ""),
-        "status": str(event.get("child_status") or ""), "user_text": _text(event.get("child_goal"))[:1000],
+        "status": str(event.get("child_status") or ""), "user_text": redact(_text(event.get("child_goal")))[:1000],
         "assistant_text": summary[:MAX_ASSISTANT], "source_kind": "session", "platform": "subagent",
     }
     return store.add_signal(

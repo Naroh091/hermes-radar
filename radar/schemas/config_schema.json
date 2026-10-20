@@ -142,6 +142,7 @@
         "debounce_seconds",
         "historical_import",
         "local_sessions",
+        "session_auto_jobs",
         "session_quiet_minutes",
         "state_db_poll_seconds"
       ],
@@ -165,20 +166,49 @@
         "session_quiet_minutes": {
           "type": "integer",
           "default": 30
+        },
+        "session_auto_jobs": {
+          "type": "boolean",
+          "default": false
         }
       }
     },
     "context": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["memory", "sessions", "timeout_seconds", "max_chars", "session_results", "memory_tool"],
+      "required": [
+        "memory",
+        "sessions",
+        "timeout_seconds",
+        "max_chars",
+        "session_results",
+        "memory_tool"
+      ],
       "properties": {
-        "memory": {"type": "boolean", "default": true},
-        "sessions": {"type": "boolean", "default": true},
-        "timeout_seconds": {"type": "integer", "default": 45},
-        "max_chars": {"type": "integer", "default": 1500},
-        "session_results": {"type": "integer", "default": 3},
-        "memory_tool": {"type": "string", "default": ""}
+        "memory": {
+          "type": "boolean",
+          "default": true
+        },
+        "sessions": {
+          "type": "boolean",
+          "default": true
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "default": 45
+        },
+        "max_chars": {
+          "type": "integer",
+          "default": 1500
+        },
+        "session_results": {
+          "type": "integer",
+          "default": 3
+        },
+        "memory_tool": {
+          "type": "string",
+          "default": ""
+        }
       }
     },
     "scheduler": {
@@ -205,6 +235,7 @@
       "required": [
         "batch_minutes",
         "daily_limit",
+        "digest_times",
         "enabled",
         "quiet_end",
         "quiet_start",
@@ -234,6 +265,17 @@
         "reminder_cooldown_hours": {
           "type": "integer",
           "default": 24
+        },
+        "digest_times": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "09:00",
+            "14:00",
+            "19:00"
+          ]
         }
       }
     },
@@ -398,19 +440,32 @@
           "calendar_id": {
             "type": "string"
           },
-          "account": {"type": "string"},
-          "lookback_hours": {"type": "integer", "minimum": 0},
-          "lookahead_days": {"type": "integer", "minimum": 0},
-          "initial_import": {"type": "boolean"},
+          "account": {
+            "type": "string"
+          },
+          "lookback_hours": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "lookahead_days": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "initial_import": {
+            "type": "boolean"
+          },
           "repos": {
             "type": "array",
             "items": {
               "type": "string"
             }
           },
-          "consume": {"type": "boolean"},
-          "all_branches": {"type": "boolean"},
-          "initial_import": {"type": "boolean"},
+          "consume": {
+            "type": "boolean"
+          },
+          "all_branches": {
+            "type": "boolean"
+          },
           "events": {
             "type": "array",
             "items": {

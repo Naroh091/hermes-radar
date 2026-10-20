@@ -31,7 +31,7 @@ config_schema:
   notices_per_day: {type: int, default: 8, label: Notices per day, description: "Daily cap of automatic Telegram notices. Results of steps you approved with a button are always delivered."}
   quiet_start: {type: str, default: "22:00", label: Quiet hours start, description: "HH:MM in your timezone. Non-urgent notices wait until quiet hours end."}
   quiet_end: {type: str, default: "08:00", label: Quiet hours end, description: "HH:MM in your timezone."}
-  notifications: {type: dict, default: {}, description: "Advanced: notices to the owner (enabled, batch_minutes, reminder_cooldown_hours)"}
+  notifications: {type: dict, default: {}, description: "Advanced: notices to the owner (enabled, digest_times, batch_minutes, reminder_cooldown_hours)"}
   limits: {type: dict, default: {}, description: Daily budgets}
   retention: {type: dict, default: {}, description: Retention of snippets, content and audit}
   sources: {type: list, default: [], description: Enabled sources (gmail, calendar, github, http_status)}

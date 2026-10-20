@@ -4,6 +4,7 @@ from __future__ import annotations
 CATEGORIES = ["trip", "purchase", "work_item", "commitment", "check", "routine", "other", "noise"]
 TASK_KINDS = ["trip", "purchase", "work_item", "commitment", "check", "routine", "other"]
 DISPOSITIONS = ["notify_now", "digest", "silent"]
+URGENCIES = ["now", "today", "this_week", "whenever"]
 RISK_FLAGS = ["security", "service_interruption", "deadline", "financial_loss"]
 ACTION_CLASSES = ["read", "local", "external"]
 SCOPE_FIELDS = ["account", "sender", "message_type", "project", "kind", "source_kind", "repo"]
@@ -60,6 +61,7 @@ EXTRACT_SCHEMA = _obj(
         "proposed_reply": _STR,
         "keep_full_content": _BOOL,
         "needs_thread": _BOOL,
+        "conversation_state": {"type": "string", "enum": ["resolved", "open", "deferred", "not_a_conversation"]},
     }
 )
 
@@ -100,6 +102,8 @@ PLAN_SCHEMA = _obj(
         })),
         "notify": _obj({
             "disposition": {"type": "string", "enum": DISPOSITIONS},
+            "urgency": {"type": "string", "enum": URGENCIES},
+            "importance": {"type": "string", "enum": ["high", "normal", "low"]},
             "reason": _STR,
         }),
         "message": _STR,
