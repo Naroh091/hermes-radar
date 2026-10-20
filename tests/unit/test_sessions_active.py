@@ -73,4 +73,6 @@ def test_apply_silences_notices_for_tasks_whose_session_is_live(store):
                                             checklist=[], notify={"disposition": "notify_now", "reason": "x"}, message="Buscando RAM."))
     result = act.apply(store, cfg, signals=signals, extract=extract_step.validate_extract(extract_answer(category="purchase")), plan=plan, now_dt=NOW, preferences=[])
     assert result.disposition == "silent" and store.get_task(result.task_id)["entities"]["session_id"] == SID
-    assert all(p["batch_key"] == "silent" for p in store.list_proposals(task_id=result.task_id))
+    proposals = store.list_proposals(task_id=result.task_id)
+    assert all(p["batch_key"] == "silent" for p in proposals if not p["params"].get("when"))
+    assert all(p["batch_key"] == "now" for p in proposals if p["params"].get("when"))  # a step for a later moment speaks then, once the chat is over

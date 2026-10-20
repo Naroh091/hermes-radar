@@ -400,7 +400,10 @@ def apply(
                 continue
             attempted += 1
             when = parse_iso(item.get("when"))
-            if slot is not None and (when is None or when < slot):
+            item_batch = batch_key
+            if when is not None and when > now_dt:
+                item_batch = "now"  # a step for a chosen moment is its own notice at that moment, never summary filler
+            elif slot is not None and (when is None or when < slot):
                 when = slot  # grouped news waits for its summary slot
             deliver_after = iso(when) if when and when > now_dt else ""
             ttl = timedelta(hours=SCHEDULED_TTL_HOURS) if deliver_after else timedelta(hours=PROPOSAL_TTL_HOURS)
@@ -416,7 +419,7 @@ def apply(
                         **({"ask": True} if item.get("ask") else {}),
                         **({"draft": draft["text"], "draft_ref": draft.get("ref", "")} if draft else {})},
                 options=options, urgency=item.get("urgency", "normal"), expires_at=expires_at, fingerprint=fingerprint,
-                now=now, batch_key=batch_key,
+                now=now, batch_key=item_batch,
             )
             if result.get("created"):
                 proposal_ids.append(result["id"])

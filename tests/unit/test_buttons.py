@@ -39,7 +39,7 @@ def test_a_protected_risk_flag_keeps_news_out_of_silence_not_out_of_the_summary(
     risky = extract_answer(risk_flags=["financial_loss"], disposition="silent")
     weekly = _apply(store, cfg, plan_answer(notify={"disposition": "silent", "urgency": "this_week", "importance": "normal", "reason": "x"}), extract=risky)
     assert weekly.attention_reason == "protected_exception" and weekly.disposition == "digest"
-    assert {p["batch_key"] for p in store.list_proposals(task_id=weekly.task_id)} == {"digest"}
+    assert {p["batch_key"] for p in store.list_proposals(task_id=weekly.task_id) if not p["params"].get("when")} == {"digest"}
     urgent = _apply(store, cfg, plan_answer(task={**plan_answer()["task"], "title": "Cargo no reconocido"},
                                             notify={"disposition": "notify_now", "urgency": "now", "importance": "high", "reason": "x"}), extract=risky)
     assert urgent.disposition == "notify_now"

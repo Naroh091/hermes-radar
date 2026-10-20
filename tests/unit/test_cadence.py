@@ -37,11 +37,10 @@ def test_only_what_cannot_wait_interrupts_and_the_rest_waits_for_its_slot(store)
     weekly = _apply(store, cfg, plan_answer(notify={"disposition": "notify_now", "urgency": "this_week", "importance": "normal", "reason": "x"}))
     assert weekly.disposition == "digest"
     proposals = store.list_proposals(task_id=weekly.task_id)
-    assert {p["batch_key"] for p in proposals} == {"digest"}
     hotel = next(p for p in proposals if p["title"].startswith("Buscar hotel"))
     checkin = next(p for p in proposals if p["title"].startswith("Hacer check-in"))
-    assert hotel["params"]["deliver_after"] == "2026-10-20T07:00:00Z" and hotel["params"]["urgency"] == "this_week"
-    assert checkin["params"]["deliver_after"] == "2026-11-02T06:00:00Z"  # its own later date stays
+    assert hotel["batch_key"] == "digest" and hotel["params"]["deliver_after"] == "2026-10-20T07:00:00Z" and hotel["params"]["urgency"] == "this_week"
+    assert checkin["batch_key"] == "now" and checkin["params"]["deliver_after"] == "2026-11-02T06:00:00Z"  # its own moment, as its own notice
     urgent = _apply(store, cfg, plan_answer(task={**plan_answer()["task"], "title": "Vuelo mañana sin hotel"},
                                             notify={"disposition": "notify_now", "urgency": "now", "importance": "high", "reason": "x"}))
     assert urgent.disposition == "notify_now"

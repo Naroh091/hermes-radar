@@ -301,8 +301,9 @@ def _start_auto(rt: Any, proposal: dict[str, Any], task: dict[str, Any], now_dt:
     if proposal.get("status") != "pending" or not _auto_eligible(rt, proposal, task):
         return False
     params = proposal.get("params") or {}
-    if params.get("deliver_after") and str(params["deliver_after"]) > now:
-        return False  # scheduled for later on purpose
+    scheduled = act.parse_iso(params.get("when"))
+    if scheduled is not None and scheduled > now_dt:
+        return False  # the planner chose a later moment on purpose; a summary slot is not a reason to wait
     reason = job_block_reason(store, config, proposal=proposal, now_dt=now_dt, auto=True)
     if reason and reason not in DEFER_REASONS:
         return False
@@ -331,10 +332,23 @@ def _hand_back(store: Any, proposal: dict[str, Any], now: str) -> None:
 
 
 def retry_pending_jobs(rt: Any, now_dt: datetime) -> int:
-    """Each tick: start waiting steps whose block cleared; park accepted steps that never got a job."""
+    """Each tick: start waiting steps whose block cleared, park accepted steps that never got a job,
+    and run the scheduled steps whose moment has come when trust allows (the rest reach the owner as a notice)."""
     store, config = rt.store, rt.config
     now = iso(now_dt)
     started = 0
+    for proposal in store.list_proposals(statuses=("pending",), limit=200):
+        due = act.parse_iso((proposal.get("params") or {}).get("when"))
+        if due is None or due > now_dt or proposal.get("operation_id") in ("check", "inform"):
+            continue
+        try:
+            task = store.get_task(str(proposal.get("task_id") or ""))
+        except KeyError:
+            continue
+        if task.get("status") in TASK_TERMINAL or task.get("muted"):
+            continue
+        if _start_auto(rt, proposal, task, now_dt):
+            started += 1
     for proposal in store.list_proposals(statuses=("waiting", "accepted"), limit=200):
         response = proposal.get("response") or {}
         auto = bool(response.get("auto"))

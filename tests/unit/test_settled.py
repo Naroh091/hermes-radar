@@ -145,3 +145,64 @@ def test_pull_requests_are_rechecked_shortly_before_their_summary(store, tmp_pat
     assert store.get_proposal("p-draft")["status"] == "expired" and store.get_proposal("p-call")["status"] == "pending"
     assert [call["purpose"] for call in llm.calls] == ["radar.plan"]
     assert [p["operation_id"] for p in store.list_proposals(task_id="t3", statuses=("pending",))] == ["inform"]
+
+
+def _runtime(store, cfg, tmp_path, clock=lambda: NOW):
+    return Runtime(FakeContext(cfg), store, cfg, worker_id="w", clock=clock, hermes_home=str(tmp_path))
+
+
+def test_a_step_for_a_chosen_moment_is_its_own_notice_at_that_moment(store):
+    cfg = active_config()
+    verify_destination(store)
+    opening = "2026-10-22T05:45:00Z"  # check-in opens 24h before a 07:45 local departure
+    plan = plan_answer(task={**plan_answer()["task"], "title": "Viaje Madrid-Valencia, 23–25 de octubre"},
+                       proposals=[{"title": "Facturar el vuelo IB8832", "rationale": "La facturación abre 24 h antes.", "action_class": "external",
+                                   "operation": "web.act", "when": opening, "urgency": "normal", "options": [{"id": "do", "label": "Facturar"}, {"id": "no", "label": "No"}]}],
+                       checks=[], notify={"disposition": "digest", "urgency": "this_week", "importance": "normal", "reason": "x"})
+    result = _apply(store, cfg, plan)
+    [step] = store.list_proposals(task_id=result.task_id)
+    assert step["batch_key"] == "now" and step["params"]["deliver_after"] == opening and step["params"]["when"] == opening
+    assert dispatch(store, cfg, NOW) == {"notices": 0, "digests": 0, "proposals": 0}  # nothing before its moment
+    assert dispatch(store, cfg, datetime(2026, 10, 20, 7, 0, tzinfo=timezone.utc))["digests"] == 0  # not summary filler either
+    counts = dispatch(store, cfg, datetime(2026, 10, 22, 5, 45, tzinfo=timezone.utc))
+    assert counts["notices"] == 1
+    [row] = store.list_outbox(limit=5)
+    assert "Facturar el vuelo IB8832" in row["payload"]["text"] and row["payload"]["buttons"][0][0]["label"] == "Facturar"
+
+
+def test_summary_slots_no_longer_hold_back_automatic_steps(store, tmp_path):
+    from radar.pipeline.process import _start_auto, retry_pending_jobs
+
+    cfg = active_config(trust={"level": "autonomous", "overrides": {}, "auto_external": []})
+    verify_destination(store)
+    plan = plan_answer(task={**plan_answer()["task"], "kind": "work_item", "title": "Revisar el PR #87"},
+                       proposals=[{"title": "Preparar comentario de revisión", "rationale": "", "action_class": "local", "operation": "gmail.create_draft",
+                                   "when": "", "urgency": "normal", "options": []}],
+                       checks=[], notify={"disposition": "digest", "urgency": "this_week", "importance": "normal", "reason": "x"})
+    result = _apply(store, cfg, plan, extract=extract_answer(category="work_item"))
+    [draft] = store.list_proposals(task_id=result.task_id)
+    assert draft["batch_key"] == "digest" and draft["params"]["deliver_after"] == "2026-10-20T07:00:00Z"
+    rt = _runtime(store, cfg, tmp_path)
+    assert _start_auto(rt, draft, store.get_task(result.task_id), NOW) is True  # the slot delays the news, not the work
+    assert store.get_proposal(draft["id"])["status"] in ("accepted", "waiting", "executing") and store.list_jobs(task_id=result.task_id, limit=5)
+    # A step the planner set for later waits for its moment, then runs by itself when trust allows...
+    later = plan_answer(task={**plan_answer()["task"], "title": "Informe mensual"},
+                        proposals=[{"title": "Preparar el informe", "rationale": "", "action_class": "local", "operation": "",
+                                    "when": "2026-10-19T12:00:00Z", "urgency": "normal", "options": []}],
+                        checks=[], notify={"disposition": "digest", "urgency": "this_week", "importance": "normal", "reason": "x"})
+    scheduled = _apply(store, cfg, later)
+    [report] = store.list_proposals(task_id=scheduled.task_id)
+    assert _start_auto(rt, report, store.get_task(scheduled.task_id), NOW) is False
+    assert retry_pending_jobs(rt, NOW) == 0
+    assert retry_pending_jobs(rt, datetime(2026, 10, 19, 12, 0, tzinfo=timezone.utc)) == 1
+    assert store.get_proposal(report["id"])["status"] in ("accepted", "waiting", "executing")
+    # ...while an external one still reaches the owner as a notice at its moment.
+    external = plan_answer(task={**plan_answer()["task"], "title": "Tren a Gijón"},
+                           proposals=[{"title": "Facturar el tren", "rationale": "", "action_class": "external", "operation": "web.act",
+                                       "when": "2026-10-19T12:00:00Z", "urgency": "normal", "options": []}],
+                           checks=[], notify={"disposition": "digest", "urgency": "this_week", "importance": "normal", "reason": "x"})
+    asked = _apply(store, cfg, external)
+    at_noon = datetime(2026, 10, 19, 12, 0, tzinfo=timezone.utc)
+    assert retry_pending_jobs(rt, at_noon) == 0
+    [checkin] = store.list_proposals(task_id=asked.task_id)
+    assert checkin["status"] == "pending" and dispatch(store, cfg, at_noon)["notices"] == 1

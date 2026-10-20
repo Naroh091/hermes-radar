@@ -22,7 +22,7 @@ EXTERNAL_OPERATIONS = frozenset({
     "gmail.send_email", "gmail.reply", "gmail.reply_all", "gmail.send_reply", "gmail.archive", "gmail.mark",
     "gmail.filter", "gmail.delete", "gmail.modify", "github.merge_pr", "github.close_pr", "github.comment",
     "deploy.run", "db.write", "db.delete", "mailbox.write", "mailbox.delete", "payments.charge",
-    "publish.post", "calendar.respond", "calendar.create", "booking.reserve",
+    "publish.post", "calendar.respond", "calendar.create", "booking.reserve", "web.act",
 })
 
 
