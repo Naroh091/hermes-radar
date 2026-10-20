@@ -12,7 +12,7 @@ from typing import Any
 _EDIT = re.compile(r"m[áa]s breve|m[áa]s corto|cambia|corrige|reescribe|edita|shorter|rewrite|change it|edit")
 _PREF = re.compile(r"no me avises|no avisar|siempre|todos los|estas alertas|nunca me|don'?t notify|stop notifying|always|never notify|mute these")
 _LATER = re.compile(r"m[áa]s tarde|luego|ma[ñn]ana|recu[ée]rdamelo|later|tomorrow|remind me|not now|ahora no")
-_REJECT = re.compile(r"\bdescarta\b|\bcancela\b|rechazo|ignora|no lo env|no la env|no env|\bdismiss\b|\bcancel\b|\breject\b|don'?t send|do not send|\bskip\b")
+_REJECT = re.compile(r"^(no|nope|nah)\b|desc[aá]rta|\bcancela\b|rechazo|ignora|no lo env|no la env|no env|\bdismiss\b|\bcancel\b|\breject\b|don'?t send|do not send|\bskip\b")
 _APPROVE = re.compile(r"\bs[íi]\b|env[íi]a|adelante|apruebo|\bvale\b|\bok\b|de acuerdo|hazlo|\byes\b|\bgo ahead\b|\bapprove\w*\b|\bdo it\b|\bsend it\b|\bsure\b")
 _QUESTION = re.compile(r"\?|^(qu[ée]|c[óo]mo|cu[áa]l|has |has comprobado|por qu|what|how|which|why|did you)")
 _THANKS = re.compile(r"gracias|thanks|thank you")

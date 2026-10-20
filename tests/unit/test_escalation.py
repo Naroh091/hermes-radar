@@ -74,7 +74,7 @@ def test_handle_investigates_silently_first_then_inform_tells_the_news_without_a
     counts = dispatch(store, cfg, NOW)
     assert counts["notices"] == 1
     text = store.list_outbox(limit=1)[0]["payload"]["text"]
-    assert "has cobrado 1.500" in text and "<b>Propuestas:</b>" not in text and "1." not in text.split("Propuestas")[0][:0] + text.replace("1.500", "")
+    assert "has cobrado 1.500" in text and "<b>Puedo hacer:</b>" not in text and "1." not in text.replace("1.500", "")
     assert store.list_outbox(limit=1)[0]["payload"]["buttons"][0][0]["label"] == "👍 Vale"
     # "Vale" acknowledges: no job, and it is never remembered as something the owner refused.
     assert job_block_reason(store, cfg, proposal=news[0], now_dt=NOW) == "check"

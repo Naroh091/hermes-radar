@@ -128,6 +128,11 @@ def declined_recently(store: Any, task_id: str, now_dt: datetime, hours: int = D
     return out
 
 
+def awaiting_owner(store: Any, task_id: str) -> bool:
+    """True while a notice about this task sits unanswered in the owner's chat (or sleeps until they asked)."""
+    return bool(store.list_proposals(statuses=("sent", "snoozed"), task_id=task_id, limit=1))
+
+
 def matches_declined(item: dict[str, Any], declined: list[dict[str, str]]) -> bool:
     """Same title, or the same operation with the same effect class, counts as the step the owner refused."""
     operation = str(item.get("operation") or "")
@@ -345,8 +350,8 @@ def apply(
     )
     disposition = attention.disposition
     urgency = str(plan["notify"].get("urgency") or "today")
-    if disposition == "notify_now" and attention.reason == "model_evaluation" and urgency != "now":
-        disposition = "digest"  # only what cannot wait interrupts; the rest is grouped
+    if disposition == "notify_now" and attention.reason in ("model_evaluation", "protected_exception") and urgency != "now":
+        disposition = "digest"  # only what cannot wait interrupts; a protected risk flag keeps it out of silence, not out of the summary
     if task_session_active(store, task, now_dt, config) and not owner_followup:
         disposition = "silent"  # the owner is already in that conversation
     escalation = str((plan.get("escalation") or {}).get("decision") or "ask")
@@ -362,6 +367,8 @@ def apply(
     proposal_ids: list[str] = []
     if not terminal or inform_only:  # news about a task that just completed still reaches the owner
         batch_key = "now" if owner_followup else {"notify_now": "now", "digest": "digest", "silent": "silent"}[disposition]
+        if batch_key == "now" and not owner_followup and urgency != "now" and awaiting_owner(store, task_id):
+            batch_key = "digest"  # the owner already has an unanswered notice about this task: no second interruption
         slot = next_delivery(now_dt, "today" if urgency == "now" else urgency, config) if batch_key == "digest" else None
         candidates: list[dict[str, Any]] = []
         for check in asks:

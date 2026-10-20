@@ -22,7 +22,7 @@ const TEXT = {
   es: {
     proposal: 'propuesta', title: 'Radar', empty: 'Nada en el radar.', emptyHint: 'Cuando llegue algo que merezca tu atención, aparecerá aquí.',
     error: 'El panel no se pudo cargar: ', tasks: 'tareas', proposals: 'Propuestas', checklist: 'Pendiente', draft: 'Propongo responder',
-    context: 'Correo', later: 'Más tarde', mute: 'No avisar', done: 'Ya está hecho', report: 'Ver informe', hideReport: 'Ocultar informe',
+    context: 'Correo', later: 'Recordar mañana', mute: 'No avisar más', done: 'Ya está resuelto', report: 'Ver informe', hideReport: 'Ocultar informe',
     waiting: 'en espera', executing: 'en marcha', nothingPending: 'Nada que decidir ahora.', due: 'Vence', jobRunning: 'trabajando',
     forget: 'Olvidar', dismiss: 'Descartar', save: 'Guardar', instruction: 'Qué quieres que cambie…', sender: 'remitente (opcional)',
     effects: { silent: 'no avisar', digest: 'solo resumen', notify: 'avisar siempre', prefer: 'preferir' },
@@ -38,7 +38,7 @@ const TEXT = {
   en: {
     proposal: 'proposal', title: 'Radar', empty: 'Nothing on the radar.', emptyHint: 'When something deserves your attention, it will show up here.',
     error: 'The panel could not load: ', tasks: 'tasks', proposals: 'Proposals', checklist: 'Pending', draft: 'Suggested reply',
-    context: 'Email', later: 'Later', mute: 'Mute', done: 'Already done', report: 'Show report', hideReport: 'Hide report',
+    context: 'Email', later: 'Remind me tomorrow', mute: 'Stop notifying', done: 'Already resolved', report: 'Show report', hideReport: 'Hide report',
     waiting: 'waiting', executing: 'running', nothingPending: 'Nothing to decide right now.', due: 'Due', jobRunning: 'working',
     forget: 'Forget', dismiss: 'Dismiss', save: 'Save', instruction: 'What should change…', sender: 'sender (optional)',
     effects: { silent: 'never notify', digest: 'digest only', notify: 'always notify', prefer: 'prefer' },

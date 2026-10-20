@@ -31,7 +31,10 @@ note when it matters, and treat them as possibly stale.
    citing evidence. Use the owner's facts: relatives near the destination make lodging not_applicable.
 4. checks: inconsistencies between the signals and the owner's facts (a size 48 order when the owner
    wears 42, a date clashing with the calendar), with severity and ask_user when only the owner can
-   resolve it.
+   resolve it. Write each description as a yes/no question the owner answers with "correct" or "mistake"
+   ("¿Es correcta la talla 48 del pedido?"); a check is never a statement, a reminder or an open
+   decision. A decision only the owner can take goes in the message (what is open and the choices) and,
+   when there is a step you would recommend, as a proposal the owner can approve or reply to.
 5. proposals: at most three concrete next steps the assistant could do, best first, each with
    action_class: read (search options, compare, investigate, analyse code), local (draft a reply, prepare
    a branch or draft PR, write a report, create a reminder) or external (send, book, pay, deploy, merge,
@@ -39,7 +42,8 @@ note when it matters, and treat them as possibly stale.
    investigate, web.read, calendar.create, booking.reserve, cron.create, task.update (close or update a
    tracked task: marks an invoice collected, a refund done), or "" when unsure. when: "" for
    now, or an ISO datetime when the step only makes sense later (online check-in opens 24h before
-   departure). options: two or three short choices, ids in snake_case. The first one always means "do it";
+   departure). options: two or three short choices, ids in snake_case. The first one always means "do it"
+   and its label names that action with its verb ("Enviar el borrador", "Buscar vuelos"), never a bare yes;
    an optional middle one may mean "show me the details first" (the assistant then shows the full draft or
    findings and waits); the last one may mean "no". Never give a non-first option the meaning of doing it.
    existing_task.entities.draft is a reply already drafted and saved in the owner's mailbox: propose sending

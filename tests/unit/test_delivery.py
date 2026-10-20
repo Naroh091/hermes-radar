@@ -32,7 +32,9 @@ def test_notice_and_digest_formatting_with_buttons(store):
     proposals = [store.get_proposal(i) for i in ids]
     notice = build_notice(task, proposals, language="es", message="Tienes vuelo y no hotel.")
     assert notice["text"].startswith("<b>✈️ Viaje a Lisboa</b>") and "Pendiente" in notice["text"] and "1. Propuesta 0" in notice["text"]
-    assert notice["buttons"][0][0]["data"] == "pa:p0:do" and notice["buttons"][-1][0]["data"] == "pt:t1:later"
+    assert notice["buttons"][0][0]["data"] == "pa:p0:do" and notice["buttons"][-2][0]["data"] == "pt:t1:done"
+    assert notice["buttons"][-2][1]["data"] == "pt:t1:later" and notice["buttons"][-1][0]["data"] == "pt:t1:mute"
+    assert "<b>Puedo hacer:</b>" in notice["text"] and "Responde a este mensaje" in notice["text"]
     assert notice["buttons"][0][0]["label"].startswith("1️⃣")
     digest = build_digest([(task, proposals)], language="en")
     assert "Pending summary" in digest["text"] and digest["proposal_ids"] == ids
@@ -83,7 +85,8 @@ def test_responses_accept_decline_snooze_mute_and_checks(store):
     accepted = respond_to_proposal(store, cfg, proposal_id=ids[0], option="do", actor="telegram:7", now_dt=NOW)
     assert accepted["outcome"] == "accepted" and store.get_proposal(ids[0])["response"]["option"] == "do"
     snoozed = respond_to_proposal(store, cfg, proposal_id=ids[1], option="later", actor="telegram:7", now_dt=NOW)
-    assert snoozed["outcome"] == "snoozed" and store.get_proposal(ids[1])["snoozed_until"] == "2026-10-20T10:00:00Z"
+    assert snoozed["outcome"] == "snoozed" and store.get_proposal(ids[1])["snoozed_until"] == "2026-10-20T07:00:00Z"  # 09:00 Madrid, the next morning slot
+    assert snoozed["text"].startswith("Te lo recuerdo mañana a las 09:00")
     assert respond_to_proposal(store, cfg, proposal_id=ids[0], option="no", actor="telegram:7", now_dt=NOW)["outcome"] == "stale"
     muted = act_on_task(store, cfg, task_id="t1", action="mute", actor="telegram:7", now_dt=NOW)
     assert muted["outcome"] == "muted" and store.get_task("t1")["muted"] == 1
@@ -92,7 +95,8 @@ def test_responses_accept_decline_snooze_mute_and_checks(store):
     store.create_task_proposal(proposal_id="chk", task_id="c1", title="¿Es correcta la talla 48?", reason_text="", action_class="read", operation_id="check",
                                params={}, options=[{"id": "ok", "label": "Sí"}, {"id": "wrong", "label": "Error"}], urgency="high",
                                expires_at="2026-10-22T10:00:00Z", fingerprint="chk", now="2026-10-19T10:00:00Z")
-    assert respond_to_proposal(store, cfg, proposal_id="chk", option="ok", actor="telegram:7", now_dt=NOW)["outcome"] == "declined"
+    confirmed = respond_to_proposal(store, cfg, proposal_id="chk", option="ok", actor="telegram:7", now_dt=NOW)
+    assert confirmed["outcome"] == "declined" and confirmed["text"].startswith("Confirmado, es correcto")
     assert store.get_task("c1")["status"] == "done"
 
 
@@ -205,7 +209,7 @@ def test_notice_shrinks_long_parts_at_word_boundaries_to_fit_telegram(store):
         ids.append(f"q{index}")
     payload = build_notice(store.get_task("t8"), [store.get_proposal(i) for i in ids], language="es")
     text = payload["text"]
-    assert len(text) <= 3800 and "palabra…" in text and "palabr…" not in text and len(payload["buttons"]) == 5
+    assert len(text) <= 3800 and "palabra…" in text and "palabr…" not in text and len(payload["buttons"]) == 6
 
 
 def test_owner_followups_bypass_the_daily_notice_limit(store):
@@ -282,7 +286,7 @@ def test_notice_shows_who_wrote_when_and_what_in_the_email_thread(store):
     text = payload["text"]
     assert "<b>Correo:</b> Bernd Müller · 19 oct 11:02 · 3 mensajes en el hilo · con tú" in text
     assert "<i>Asunto: Bug uploading photos</i>" in text and "<blockquote>It still happens today" in text and "wrote:" not in text
-    assert text.index("Bernd sigue viendo") < text.index("<b>Correo:</b>") < text.index("<b>Propuestas:</b>")
+    assert text.index("Bernd sigue viendo") < text.index("<b>Correo:</b>") < text.index("<b>Puedo hacer:</b>")
     # The account is named only when the owner watches several mailboxes; the digest keeps just the header line.
     cfg["sources"] = [{"id": "a", "kind": "gmail"}, {"id": "b", "kind": "gmail"}]
     context = thread_context(store, "t7", cfg, now_dt=NOW)
@@ -311,7 +315,7 @@ def test_email_context_shrinks_before_the_notice_is_cut_and_review_quotes_the_th
     context = thread_context(store, "t8b", cfg, now_dt=NOW)
     payload = build_notice(store.get_task("t8b"), [store.get_proposal(i) for i in ids], language="es", context=context)
     assert len(payload["text"]) <= MAX_MESSAGE and "<b>Correo:</b> Bernd Müller" in payload["text"]  # header survives, excerpt is the first to go
-    assert "<blockquote>" not in payload["text"] and payload["text"].count("<b>Propuestas:</b>") == 1
+    assert "<blockquote>" not in payload["text"] and payload["text"].count("<b>Puedo hacer:</b>") == 1
     # "Revisarlo primero" starts with what is being answered.
     store.create_task_proposal(proposal_id="p8r", task_id="t8b", title="Responder a Bernd", reason_text="Listo", action_class="external", operation_id="gmail.reply",
                                params={"draft": "Hi Bernd, could you share the 9 MB file?", "draft_ref": "Draft ID: r9"},

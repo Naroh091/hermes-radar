@@ -145,7 +145,7 @@ hermes radar tasks
 hermes radar explain <task_id> --html
 ```
 
-En Telegram: cada tarea nueva con huecos llega como un aviso con propuestas numeradas y botones; "Más tarde" pospone 24 h y "No avisar de esto" silencia la tarea. También puedes responder al aviso con texto ("sí", "la 2", "mañana", "ya está hecho") o pedírselo al agente en el chat (`radar_resolve`).
+En Telegram: cada tarea nueva con huecos llega como un aviso con dos bloques numerados y botones. «Confírmame» son preguntas de sí o no («¿Es correcta la talla 48?»): «Sí, es correcto» cierra la duda y «No, es un error» la deja marcada para que le cuentes qué falla. «Puedo hacer» son pasos que Radar haría por ti: «Adelante» los lanza (o pide tu autorización si tocan a terceros) y «Descartar» los retira y no se vuelven a proponer. Los botones de abajo actúan sobre la tarea entera: «Ya está resuelto» la cierra, «Recuérdamelo mañana» la aparca hasta el primer resumen del día siguiente y «No avises más de esto» la silencia para siempre (se reactiva desde el panel). También puedes responder al aviso con tus palabras: «sí», «la 2», «mañana», «ya está hecho» o cualquier matiz; lo que no sea una orden directa lo recibe el agente en el chat con las propuestas pendientes en su contexto (`radar_resolve`).
 
 ## 6. Migrar desde mail-intelligence
 

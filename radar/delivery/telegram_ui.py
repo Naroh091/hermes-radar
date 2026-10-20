@@ -80,7 +80,7 @@ def remaining_keyboard(rt: Any, outbox_row: dict[str, Any] | None) -> list[list[
         try:
             task = rt.store.get_task(task_id)
             if task.get("status") not in {"done", "abandoned", "expired"} and not task.get("muted"):
-                rows.append(task_buttons(task_id, language))
+                rows.extend(task_buttons(task_id, language))
         except KeyError:
             pass
     return rows
@@ -195,8 +195,8 @@ async def handle_text_reply(rt: Any, event: Any) -> dict[str, Any] | None:
         result = await learn_preference(rt, text=text, task_id=row.get("task_id") or (row.get("payload") or {}).get("task_id"), actor=actor, now_dt=rt.clock())
     if result.get("outcome") == "accepted":
         with_followup(result, _after_accept(rt, result, "do"))
-    if result.get("outcome") in {"question"}:
-        return None  # let the agent answer with the pending proposals in its context
+    if result.get("outcome") in {"question", "unclear"}:
+        return None  # the agent answers with the pending proposals in its context and can resolve them
     ack = str(result.get("text") or "")
     if ack and rt.transports.available("telegram"):
         try:

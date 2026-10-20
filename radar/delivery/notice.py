@@ -51,10 +51,14 @@ def proposal_buttons(proposal: dict[str, Any], language: str) -> list[dict[str, 
     return row
 
 
-def task_buttons(task_id: str, language: str) -> list[dict[str, str]]:
+def task_buttons(task_id: str, language: str) -> list[list[dict[str, str]]]:
+    """Whole-task answers, each label naming its effect: close it, hear about it tomorrow morning, never again."""
     return [
-        {"label": t(language, "btn_later"), "data": f"{TASK_PREFIX}:{task_id}:later"[:64]},
-        {"label": t(language, "btn_mute"), "data": f"{TASK_PREFIX}:{task_id}:mute"[:64]},
+        [
+            {"label": t(language, "btn_done"), "data": f"{TASK_PREFIX}:{task_id}:done"[:64]},
+            {"label": t(language, "btn_later"), "data": f"{TASK_PREFIX}:{task_id}:later"[:64]},
+        ],
+        [{"label": t(language, "btn_mute"), "data": f"{TASK_PREFIX}:{task_id}:mute"[:64]}],
     ]
 
 
@@ -68,16 +72,16 @@ def build_notice(task: dict[str, Any], proposals: list[dict[str, Any]], *, langu
     before anything is cut.
     """
     budgets = [(MAX_RATIONALE, DRAFT_INLINE, 800, MAX_EXCERPT), (300, 800, 800, 200), (150, 400, 500, 120), (0, 0, 300, 0)]
-    text, buttons = "", []
+    text, buttons, ordered = "", [], []
     for rationale_cap, draft_cap, situation_cap, excerpt_cap in budgets:
-        text, buttons = _compose(task, proposals, language=language, message=message, findings=findings, context=context,
-                                 rationale_cap=rationale_cap, draft_cap=draft_cap, situation_cap=situation_cap, excerpt_cap=excerpt_cap)
+        text, buttons, ordered = _compose(task, proposals, language=language, message=message, findings=findings, context=context,
+                                          rationale_cap=rationale_cap, draft_cap=draft_cap, situation_cap=situation_cap, excerpt_cap=excerpt_cap)
         if len(text) <= MAX_MESSAGE:
             break
     text = fit(text, MAX_MESSAGE)
     return {
         "text": text, "parse_mode": "HTML", "buttons": buttons, "task_id": task["id"],
-        "proposal_ids": [p["id"] for p in proposals[:4]], "kind": "notice",
+        "proposal_ids": [p["id"] for p in ordered], "kind": "notice",
     }
 
 
@@ -106,7 +110,8 @@ def context_lines(context: dict[str, Any] | None, *, language: str, excerpt_cap:
 
 def _compose(task: dict[str, Any], proposals: list[dict[str, Any]], *, language: str, message: str,
              findings: list[str] | None, rationale_cap: int, draft_cap: int, situation_cap: int,
-             context: dict[str, Any] | None = None, excerpt_cap: int = MAX_EXCERPT) -> tuple[str, list[list[dict[str, str]]]]:
+             context: dict[str, Any] | None = None, excerpt_cap: int = MAX_EXCERPT) -> tuple[str, list[list[dict[str, str]]], list[dict[str, Any]]]:
+    """Returns the text, the keyboard and the proposals in the order they are numbered (news, checks, steps)."""
     kind = task.get("kind", "other")
     lines = [f"<b>{_icon(language, kind)} {_esc(task.get('title'))}</b>"]
     situation = message or next((p.get("params", {}).get("message") for p in proposals if p.get("params", {}).get("message")), "") or task.get("summary", "")
@@ -123,29 +128,40 @@ def _compose(task: dict[str, Any], proposals: list[dict[str, Any]], *, language:
     if findings:
         lines.extend(["", f"<b>{_esc(t(language, 'findings'))}:</b>"] + [f"• {_esc(fit(f, 300))}" for f in findings[:5]])
     buttons: list[list[dict[str, str]]] = []
-    news = [p for p in proposals if p.get("operation_id") == "inform"]
-    proposals = [p for p in proposals if p.get("operation_id") != "inform"]
-    for item in news[:1]:
+    news = [p for p in proposals if p.get("operation_id") == "inform"][:1]
+    checks = [p for p in proposals if p.get("operation_id") == "check"]
+    steps = [p for p in proposals if p.get("operation_id") not in ("inform", "check")]
+    ordered: list[dict[str, Any]] = list(news)
+    for item in news:
         if not situation and item.get("params", {}).get("message"):
             lines.extend(["", _esc(fit(item["params"]["message"], situation_cap))])
         buttons.append(proposal_buttons(item, language))
-    if proposals:
-        lines.extend(["", f"<b>{_esc(t(language, 'proposals'))}:</b>"])
-        for index, proposal in enumerate(proposals[:4], 1):
+    numbered = (checks + steps)[:4]
+    index = 0
+    for header, group in ((t(language, "checks"), checks), (t(language, "proposals"), steps)):
+        group = [p for p in group if p in numbered]
+        if not group:
+            continue
+        lines.extend(["", f"<b>{_esc(header)}:</b>"])
+        for proposal in group:
+            index += 1
+            ordered.append(proposal)
             rationale = proposal.get("reason_text") or proposal.get("params", {}).get("rationale") or ""
             text = f"{index}. {_esc(proposal.get('title'))}"
             if rationale and rationale_cap:
                 text += f" — {_esc(fit(rationale, rationale_cap))}"
             lines.append(text)
             row = proposal_buttons(proposal, language)
-            if len(proposals) > 1:
+            if len(numbered) > 1:
                 row[0]["label"] = fit(f"{index}️⃣ {row[0]['label']}", MAX_LABEL)
             buttons.append(row)
-    draft = next((p.get("params", {}).get("draft") for p in proposals if p.get("params", {}).get("draft")), "")
+    draft = next((p.get("params", {}).get("draft") for p in steps if p.get("params", {}).get("draft")), "")
     if draft and draft_cap:
         lines.extend(["", f"<b>{_esc(t(language, 'draft'))}:</b>", f"<i>{_esc(fit(draft, draft_cap))}</i>"])
-    buttons.append(task_buttons(task["id"], language))
-    return "\n".join(lines), buttons
+    if numbered:
+        lines.extend(["", f"<i>{_esc(t(language, 'reply_hint'))}</i>"])
+    buttons.extend(task_buttons(task["id"], language))
+    return "\n".join(lines), buttons, ordered
 
 
 def build_digest(groups: list[tuple[dict[str, Any], list[dict[str, Any]]]], *, language: str,

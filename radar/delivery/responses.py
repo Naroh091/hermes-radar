@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from ..i18n import t
 from ..models import TASK_TERMINAL
+from .cadence import next_delivery
 from .context import thread_context
 
 OPEN_PROPOSAL = ("pending", "sent", "snoozed")
@@ -85,6 +86,26 @@ def iso(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def snooze_until(now_dt: datetime, config: dict[str, Any]) -> datetime:
+    """"Remind me tomorrow" means the first summary slot of the next day; without slots, 24 hours."""
+    return next_delivery(now_dt, "whenever", config) or (now_dt + timedelta(hours=SNOOZE_HOURS))
+
+
+def snoozed_text(language: str, now_dt: datetime, until: datetime, config: dict[str, Any], title: str) -> str:
+    if next_delivery(now_dt, "whenever", config) is None:
+        return t(language, "snoozed", hours=SNOOZE_HOURS, title=title)
+    local_now, local_until = now_dt.astimezone(until.tzinfo), until
+    clock = local_until.strftime("%H:%M")
+    days = (local_until.date() - local_now.date()).days
+    if days <= 0:
+        when = t(language, "when_today", time=clock)
+    elif days == 1:
+        when = t(language, "when_tomorrow", time=clock)
+    else:
+        when = t(language, "when_date", date=local_until.strftime("%d/%m"), time=clock)
+    return t(language, "snoozed_at", when=when, title=title)
+
+
 def respond_to_proposal(
     store: Any, config: dict[str, Any], *, proposal_id: str, option: str, actor: str, now_dt: datetime,
     channel: str = "telegram", note: str = "",
@@ -124,16 +145,18 @@ def respond_to_proposal(
     if intent == "decline":
         store.respond_proposal(proposal_id, decision="declined", response=response, now=now)
         outcome, text = "declined", t(language, "declined", title=title)
-        if is_check and option == "ok" and proposal.get("task_id"):
-            _close_check_task(store, proposal["task_id"], now)
+        if is_check and option == "ok":
+            text = t(language, "check_ok", title=title)
+            if proposal.get("task_id"):
+                _close_check_task(store, proposal["task_id"], now)
         if proposal.get("operation_id") == "cron.create":
             from ..patterns import dismiss
 
             dismiss(store, proposal.get("task_id"), now)
     elif intent == "later":
-        until = iso(now_dt + timedelta(hours=SNOOZE_HOURS))
-        store.respond_proposal(proposal_id, decision="snoozed", response=response, now=now, snoozed_until=until)
-        outcome, text = "snoozed", t(language, "snoozed", hours=SNOOZE_HOURS, title=title)
+        until_dt = snooze_until(now_dt, config)
+        store.respond_proposal(proposal_id, decision="snoozed", response=response, now=now, snoozed_until=iso(until_dt))
+        outcome, text = "snoozed", snoozed_text(language, now_dt, until_dt, config, title)
     elif intent == "done":
         store.respond_proposal(proposal_id, decision="declined", response={**response, "done": True}, now=now)
         outcome, text = "declined", t(language, "task_done", title=title)
@@ -146,11 +169,13 @@ def respond_to_proposal(
     else:
         store.respond_proposal(proposal_id, decision="accepted", response=response, now=now)
         outcome, text = "accepted", t(language, "accepted", title=title)
-        if is_check and proposal.get("task_id"):
-            try:
-                store.set_task_status(proposal["task_id"], "needs_user", now=now, reason="check_confirmed_wrong")
-            except (KeyError, ValueError, RuntimeError):
-                pass
+        if is_check:
+            text = t(language, "check_wrong", title=title)
+            if proposal.get("task_id"):
+                try:
+                    store.set_task_status(proposal["task_id"], "needs_user", now=now, reason="check_confirmed_wrong")
+                except (KeyError, ValueError, RuntimeError):
+                    pass
     store.add_audit(
         audit_id=str(uuid4()), event_type="owner_response", subject_type="proposal", subject_id=proposal_id,
         correlation_id=proposal.get("task_id"), actor_kind="verified_owner", decision_code=outcome,
@@ -180,7 +205,8 @@ def act_on_task(store: Any, config: dict[str, Any], *, task_id: str, action: str
     action = (action or "").strip().lower()
     open_proposals = store.list_proposals(statuses=CANCELLABLE, task_id=task_id, limit=20)
     if action in {"later", "snooze"}:
-        until = iso(now_dt + timedelta(hours=SNOOZE_HOURS))
+        until_dt = snooze_until(now_dt, config)
+        until = iso(until_dt)
         for proposal in [p for p in open_proposals if p.get("status") != WAITING]:
             store.respond_proposal(proposal["id"], decision="snoozed", response={"actor": actor, "task_action": action}, now=now, snoozed_until=until)
         if task.get("status") not in TASK_TERMINAL:
@@ -189,7 +215,7 @@ def act_on_task(store: Any, config: dict[str, Any], *, task_id: str, action: str
                 store.set_task_status(task_id, "snoozed", now=now, reason="owner_snoozed")
             except (ValueError, RuntimeError):
                 pass
-        outcome, text = "snoozed", t(language, "snoozed", hours=SNOOZE_HOURS, title=title)
+        outcome, text = "snoozed", snoozed_text(language, now_dt, until_dt, config, title)
     elif action in {"mute", "never"}:
         for proposal in open_proposals:
             store.respond_proposal(proposal["id"], decision="declined", response={"actor": actor, "task_action": action}, now=now)
@@ -229,9 +255,9 @@ def resolve_reply(
     target = open_ids[index - 1] if 0 < index <= len(open_ids) else (open_ids[0] if open_ids else None)
     task_id = outbox_row.get("task_id") or payload.get("task_id")
     if kind == "approve" and target:
-        return respond_to_proposal(store, config, proposal_id=target, option="do", actor=actor, now_dt=now_dt, note=note)
+        return respond_to_proposal(store, config, proposal_id=target, option=_answer(store, target, "yes"), actor=actor, now_dt=now_dt, note=note)
     if kind == "reject":
-        results = [respond_to_proposal(store, config, proposal_id=pid, option="no", actor=actor, now_dt=now_dt, note=note) for pid in (open_ids if index == 0 else [target])]
+        results = [respond_to_proposal(store, config, proposal_id=pid, option=_answer(store, pid, "no"), actor=actor, now_dt=now_dt, note=note) for pid in (open_ids if index == 0 else [target])]
         return results[0] if results else {"outcome": "stale", "text": t(language, "unknown_callback")}
     if kind == "later" and task_id:
         return act_on_task(store, config, task_id=task_id, action="later", actor=actor, now_dt=now_dt)
@@ -244,6 +270,17 @@ def resolve_reply(
     if kind == "thanks":
         return {"outcome": "thanks", "text": ""}
     return {"outcome": "unclear", "text": t(language, "reply_ack_unclear")}
+
+
+def _answer(store: Any, proposal_id: str, word: str) -> str:
+    """A written yes/no answers a question as such: "yes" confirms a check and "no" reports the mistake."""
+    try:
+        is_check = store.get_proposal(proposal_id).get("operation_id") == "check"
+    except KeyError:
+        is_check = False
+    if is_check:
+        return "ok" if word == "yes" else "wrong"
+    return "do" if word == "yes" else "no"
 
 
 def _is_open(store: Any, proposal_id: str) -> bool:

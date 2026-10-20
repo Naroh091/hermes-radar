@@ -1497,7 +1497,11 @@ class Store:
         return [self._decode(row) or {} for row in rows]
 
     def claim_signal_bundles(self, now: str, lease_until: str, max_bundles: int) -> list[dict[str, Any]]:
-        """Claim pending signals grouped by ``group_key``; one bundle per group, oldest first."""
+        """Claim pending signals grouped by ``group_key``; one bundle per group, oldest first.
+
+        A group is due when any of its signals is; the whole group then travels together, so a chat whose
+        turns were deferred at different moments is still judged as one conversation.
+        """
         bundles: list[dict[str, Any]] = []
         with self.transaction() as db:
             groups = db.execute(
@@ -1513,8 +1517,8 @@ class Store:
                     """UPDATE signals SET lease_until=?, fencing_token=fencing_token+1, attempts=attempts+1,
                               updated_at=?, revision=revision+1
                        WHERE profile_key=? AND owner_id=? AND group_key=? AND triage_status='pending'
-                         AND next_attempt_at<=? AND (lease_until IS NULL OR lease_until<?)""",
-                    (lease_until, now, *self._scope_values, key, now, now),
+                         AND (lease_until IS NULL OR lease_until<?)""",
+                    (lease_until, now, *self._scope_values, key, now),
                 )
                 rows = db.execute(
                     """SELECT * FROM signals WHERE profile_key=? AND owner_id=? AND group_key=?
