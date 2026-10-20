@@ -17,7 +17,7 @@ from radar.sources.session import SOURCE_ID, record_turn
 
 NOW_S = "2026-10-19T10:00:00Z"
 SID = "20261020_004547_a14ccd"
-FB_TOKEN = "EAAGFakeMetaToken0FakeMetaToken0FakeMetaToken0FakeMetaToken0FakeMetaToken0FakeMetaToken0FakeMetaToken0FakeMetaToken0FakeMetaToken0FakeMetaToken0"
+FB_TOKEN = "EAAGFakeMetaToken0FakeMetaToken0FakeMetaToken0FakeMetaToken0FakeMetaToken0FakeMetaToken0FakeMetaToken0FakeMetaToken0FakeMetaToken0FakeMetaToken0"  # synthetic, shaped like a Meta Graph token
 JWT = "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJpYXQiOjE3OTI0NTAwOTAsInJvbGVzIjpbIlJPTEVfQVBJX1dSSVRFIl19.EpTwRUnHhyzSGLFpQcUANIbXRtobPY"
 
 
