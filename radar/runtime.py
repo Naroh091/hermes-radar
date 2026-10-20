@@ -209,6 +209,22 @@ class Runtime:
                 return
         log.info("gmail push for %s matched no configured source", address)
 
+    def repo_provider(self) -> Any:
+        """A read-only ``gh`` provider when the CLI is installed, else None."""
+        gh = GhRepoProvider()
+        return gh if gh.available else None
+
+    async def refresh_artifacts(self, now_dt: datetime) -> dict[str, int]:
+        """Re-check the pull requests behind the next summary's items, in a worker thread, under the profile's secrets."""
+        from .hostscope import profile_secret_scope
+        from .pipeline.refresh import refresh_before_digest
+
+        provider = self.repo_provider()
+        if provider is None:
+            return {"checked": 0, "changed": 0}
+        with profile_secret_scope(self.hermes_home):
+            return await asyncio.to_thread(refresh_before_digest, self.store, self.config, now_dt, provider=provider)
+
     async def sync_source(self, adapter: SourceAdapter, now_dt: datetime) -> SyncResult:
         from .hostscope import profile_secret_scope
 

@@ -173,6 +173,10 @@ class Scheduler:
             from .delivery.dispatch import dispatch
 
             try:
+                stats["refreshed"] = await self.runtime.refresh_artifacts(now_dt)
+            except Exception as exc:
+                log.warning("radar refresh before digest failed: %s", exc)
+            try:
                 stats["dispatched"] = dispatch(self.store, self.config, now_dt)
             except Exception as exc:
                 log.warning("radar dispatch failed: %s", exc)

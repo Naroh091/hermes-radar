@@ -364,6 +364,9 @@ def apply(
             and may_auto_run(config.get("trust") or {}, "read", kind=task.get("kind"), operation_id=read_steps[0].get("operation") or None)):
         disposition = "silent"  # the assistant looks first; the result re-plans and decides inform or ask
     inform_only = escalation == "inform" and not (plan.get("proposals") or asks) and disposition != "silent" and bool(plan.get("message"))
+    # A decision only the owner can take, with no step to offer: the message itself travels, answered in words.
+    ask_only = (not terminal and not inform_only and not owner_followup and (escalation == "ask" or task.get("status") == "needs_user")
+                and not (plan.get("proposals") or asks) and disposition != "silent" and bool(plan.get("message")))
     proposal_ids: list[str] = []
     if not terminal or inform_only:  # news about a task that just completed still reaches the owner
         batch_key = "now" if owner_followup else {"notify_now": "now", "digest": "digest", "silent": "silent"}[disposition]
@@ -378,11 +381,13 @@ def apply(
                 "options": [{"id": "ok", "label": t(language, "btn_ok")}, {"id": "wrong", "label": t(language, "btn_wrong")}],
             })
         candidates.extend(plan.get("proposals") or [])
-        if inform_only:
+        if inform_only or ask_only:
             headline = re.split(r"(?<=[.!?])\s", str(plan.get("message") or "").strip(), maxsplit=1)[0]
+            important = str(plan["notify"].get("importance") or "normal") == "high"
             candidates.append({
                 "title": _clip_title(headline, 80), "rationale": "", "action_class": "read", "operation": "inform", "when": "",
-                "urgency": "normal" if disposition == "notify_now" else "low", "options": [{"id": "ok", "label": t(language, "btn_ack")}],
+                "urgency": ("high" if important else "normal") if ask_only else "normal" if disposition == "notify_now" else "low",
+                "options": [{"id": "ok", "label": t(language, "btn_ack")}], "ask": ask_only,
             })
         declined = declined_recently(store, task_id, now_dt)
         suppressed = 0
@@ -408,6 +413,7 @@ def apply(
                 params={"when": item.get("when", ""), "deliver_after": deliver_after, "rationale": item.get("rationale", ""),
                         "message": plan.get("message", ""), "urgency": urgency, "importance": str(plan["notify"].get("importance") or "normal"),
                         **({"owner_followup": True} if owner_followup else {}),
+                        **({"ask": True} if item.get("ask") else {}),
                         **({"draft": draft["text"], "draft_ref": draft.get("ref", "")} if draft else {})},
                 options=options, urgency=item.get("urgency", "normal"), expires_at=expires_at, fingerprint=fingerprint,
                 now=now, batch_key=batch_key,

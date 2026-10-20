@@ -41,6 +41,27 @@ def _synthetic_extract_from_job(signal: dict[str, Any], task: dict[str, Any]) ->
     }
 
 
+def _synthetic_extract_from_refresh(signal: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
+    """A pull request looked up before the summary: the signal already says what changed."""
+    meta = signal.get("meta") or {}
+    return {
+        "relevant": True, "category": task.get("kind", "other"), "title": task.get("title", ""),
+        "summary": signal.get("snippet", ""), "disposition": "digest", "reason": "artifact_refresh",
+        "urgency": "low", "impact": "low", "risk_flags": [],
+        "entities": {"repo": str(meta.get("repo") or ""), "url": str(meta.get("url") or "")}, "expectations": [], "facts_learned": [],
+        "proposed_reply": "", "keep_full_content": False, "needs_thread": False,
+    }
+
+
+def _bound_task_id(signals: list[dict[str, Any]]) -> str:
+    """The task a bundle already belongs to: job and cron results, or a refresh of the task's own artifact."""
+    if not signals:
+        return ""
+    if all(s.get("kind") in ("job_result", "cron_result") for s in signals) or all((s.get("meta") or {}).get("refresh") for s in signals):
+        return str((signals[0].get("meta") or {}).get("task_id") or "")
+    return ""
+
+
 def _settle_draft(store: Any, task_id: str, signal: dict[str, Any], now: str) -> None:
     """After a successful external mail step, the drafted reply is no longer pending."""
     meta = signal.get("meta") or {}
@@ -90,13 +111,12 @@ async def process_bundle(rt: Any, bundle: dict[str, Any], now_dt: datetime) -> d
         store.defer_signals(signals, next_attempt_at=iso(now_dt + timedelta(minutes=quiet_minutes(config))), error="session_active", now=now)
         summary["deferred"] = "session_active"
         return summary
-    if all(s.get("kind") in ("job_result", "cron_result") for s in signals) and signals:
-        task_id = (signals[0].get("meta") or {}).get("task_id")
-        if task_id:
-            try:
-                existing_task = store.get_task(task_id)
-            except KeyError:
-                existing_task = None
+    bound = _bound_task_id(signals)
+    if bound:
+        try:
+            existing_task = store.get_task(bound)
+        except KeyError:
+            existing_task = None
     if existing_task is None:
         kept, ignored = triage_bundle(signals, preferences, config)
         for signal, decision in ignored:
@@ -117,7 +137,8 @@ async def process_bundle(rt: Any, bundle: dict[str, Any], now_dt: datetime) -> d
     recall_job = asyncio.ensure_future(recall_context(rt, None, kept, existing_task))  # runs while the model extracts
     try:
         if existing_task is not None:
-            extracted = _synthetic_extract_from_job(kept[-1], existing_task)
+            last = kept[-1]
+            extracted = (_synthetic_extract_from_refresh if (last.get("meta") or {}).get("refresh") else _synthetic_extract_from_job)(last, existing_task)
             candidates = []
         else:
             conversation = None

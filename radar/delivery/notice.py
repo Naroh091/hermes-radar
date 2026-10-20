@@ -132,10 +132,12 @@ def _compose(task: dict[str, Any], proposals: list[dict[str, Any]], *, language:
     checks = [p for p in proposals if p.get("operation_id") == "check"]
     steps = [p for p in proposals if p.get("operation_id") not in ("inform", "check")]
     ordered: list[dict[str, Any]] = list(news)
+    asks = [p for p in news if (p.get("params") or {}).get("ask")]
     for item in news:
         if not situation and item.get("params", {}).get("message"):
             lines.extend(["", _esc(fit(item["params"]["message"], situation_cap))])
-        buttons.append(proposal_buttons(item, language))
+        if item not in asks:  # a decision is answered in words or with the task buttons, not with «OK»
+            buttons.append(proposal_buttons(item, language))
     numbered = (checks + steps)[:4]
     index = 0
     for header, group in ((t(language, "checks"), checks), (t(language, "proposals"), steps)):
@@ -158,7 +160,7 @@ def _compose(task: dict[str, Any], proposals: list[dict[str, Any]], *, language:
     draft = next((p.get("params", {}).get("draft") for p in steps if p.get("params", {}).get("draft")), "")
     if draft and draft_cap:
         lines.extend(["", f"<b>{_esc(t(language, 'draft'))}:</b>", f"<i>{_esc(fit(draft, draft_cap))}</i>"])
-    if numbered:
+    if numbered or asks:
         lines.extend(["", f"<i>{_esc(t(language, 'reply_hint'))}</i>"])
     buttons.extend(task_buttons(task["id"], language))
     return "\n".join(lines), buttons, ordered
@@ -179,10 +181,12 @@ def build_digest(groups: list[tuple[dict[str, Any], list[dict[str, Any]]]], *, l
         for proposal in proposals[:2]:
             counter += 1
             lines.append(f"{counter}. {_esc(proposal.get('title'))}")
+            proposal_ids.append(proposal["id"])
+            if (proposal.get("params") or {}).get("ask"):
+                continue  # an open decision is answered by replying «la N: …», not with a button
             row = proposal_buttons(proposal, language)
             row[0]["label"] = fit(f"{counter}️⃣ {row[0]['label']}", MAX_LABEL)
             buttons.append(row)
-            proposal_ids.append(proposal["id"])
     if counter == 0:
         lines.append(_esc(t(language, "digest_empty")))
     text = fit("\n".join(lines), MAX_MESSAGE)

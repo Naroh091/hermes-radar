@@ -8,7 +8,7 @@ from uuid import uuid4
 import logging
 
 from ..i18n import t
-from ..models import canonical_hash
+from ..models import TASK_TERMINAL, canonical_hash
 from .cadence import digest_due
 from .context import thread_context
 from .notice import DRAFT_INLINE, build_digest, build_notice
@@ -47,6 +47,10 @@ def _group_by_task(store: Any, proposals: list[dict[str, Any]]) -> list[tuple[di
             continue
         if task.get("muted"):
             continue
+        if task.get("status") in TASK_TERMINAL:  # settled: news may still go out, stale asks and steps never
+            items = [p for p in items if p.get("operation_id") == "inform" or (p.get("params") or {}).get("owner_followup")]
+            if not items:
+                continue
         result.append((task, items))
     return result
 

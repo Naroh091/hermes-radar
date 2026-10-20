@@ -60,6 +60,23 @@ def next_delivery(now_dt: datetime, urgency: str, config: dict[str, Any]) -> dat
     return morning + timedelta(days=1)
 
 
+def upcoming_slot(now_dt: datetime, config: dict[str, Any], lead_minutes: int) -> datetime | None:
+    """The digest slot that starts within ``lead_minutes`` (now included), or None when none is that close."""
+    slots = digest_times(config)
+    if not slots or lead_minutes <= 0:
+        return None
+    tz = _tz(config)
+    local = now_dt.astimezone(tz)
+    horizon = local + timedelta(minutes=lead_minutes)
+    for day_offset in (0, 1):
+        day = local + timedelta(days=day_offset)
+        for slot in slots:
+            candidate = day.replace(hour=slot.hour, minute=slot.minute, second=0, microsecond=0)
+            if local <= candidate <= horizon:
+                return candidate
+    return None
+
+
 def digest_due(now_dt: datetime, last_digest_at: datetime | None, config: dict[str, Any]) -> bool:
     """True when a digest slot has passed since the last digest (or every ``batch_minutes`` without slots)."""
     slots = digest_times(config)

@@ -86,8 +86,12 @@ note when it matters, and treat them as possibly stale.
    (money received, a delivery completed, a message that only needs a summary): the message carries the news,
    warm and short (one emoji is fine for good news), and proposals are empty or hold one cheap offer that
    ties the news to a tracked task (mark the invoice as collected or the refund as done with task.update,
-   local). "ask" only when the owner must decide, something is at risk, or an irreversible action is on the
-   table. Never ask the owner to go and read or check something the assistant can read or check itself.
+   local). A bundle that settles what the owner still had pending on a task (the pull request they were
+   asked to review got merged or closed, the order they tracked was delivered) is "inform" with task status
+   done and a one-line message; the steps that were waiting for them are withdrawn automatically. "ask" only
+   when the owner must decide, something is at risk, or an irreversible action is on the table; when there is
+   no step to propose, the message alone reaches the owner, who answers in words, so say what is open and the
+   choices. Never ask the owner to go and read or check something the assistant can read or check itself.
 Write message, titles, summaries, notes, check descriptions, proposal titles, rationales and option
 labels in {language}. Return only JSON matching the schema."""
 

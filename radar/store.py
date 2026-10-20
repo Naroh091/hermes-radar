@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator
 
-from .models import PlanIdentity, canonical_json, validate_transition
+from .models import TASK_TERMINAL, PlanIdentity, canonical_json, validate_transition
 
 
 @dataclass(frozen=True)
@@ -1932,6 +1932,7 @@ class Store:
         return self.get_task(task_id)
 
     def set_task_status(self, task_id: str, status: str, *, now: str, reason: str | None = None) -> dict[str, Any]:
+        """Move a task; reaching a terminal state withdraws every open proposal, so a settled task asks nothing more."""
         with self.transaction() as db:
             row = db.execute(
                 "SELECT status FROM tasks WHERE profile_key=? AND owner_id=? AND id=?",
@@ -1947,6 +1948,12 @@ class Store:
                    WHERE profile_key=? AND owner_id=? AND id=?""",
                 (status, reason, now, status, *self._scope_values, task_id),
             )
+            if status in TASK_TERMINAL:
+                db.execute(
+                    """UPDATE proposals SET status='expired', updated_at=?, revision=revision+1
+                       WHERE profile_key=? AND owner_id=? AND task_id=? AND status IN ('draft','pending','snoozed','sent')""",
+                    (now, *self._scope_values, task_id),
+                )
         return self.get_task(task_id)
 
     def link_task_signal(self, task_id: str, signal_id: str, role: str, now: str) -> bool:
