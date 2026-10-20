@@ -27,8 +27,8 @@ note when it matters, and treat them as possibly stale.
    party; needs_user when only the owner can decide; in_progress; done when the expectation is fulfilled;
    abandoned when the owner said so), due_at (ISO or ""), next_review_at (ISO or "": when it is worth
    re-checking, e.g. one day before a deadline or 24h before a flight), confidence 0-1.
-3. checklist: the template items with status done / missing / unknown / not_applicable and a short note
-   citing evidence. Use the owner's facts: relatives near the destination make lodging not_applicable.
+3. checklist: the template items, each with its item text exactly as given (it is an identifier the owner
+   sees translated), with status done / missing / unknown / not_applicable and a short note citing evidence. Use the owner's facts: relatives near the destination make lodging not_applicable.
 4. checks: inconsistencies between the signals and the owner's facts (a size 48 order when the owner
    wears 42, a date clashing with the calendar), with severity and ask_user when only the owner can
    resolve it. Write each description as a yes/no question the owner answers with "correct" or "mistake"

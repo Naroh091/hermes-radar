@@ -206,3 +206,23 @@ def test_summary_slots_no_longer_hold_back_automatic_steps(store, tmp_path):
     assert retry_pending_jobs(rt, at_noon) == 0
     [checkin] = store.list_proposals(task_id=asked.task_id)
     assert checkin["status"] == "pending" and dispatch(store, cfg, at_noon)["notices"] == 1
+
+
+def test_a_reworded_or_translated_checklist_item_updates_its_template_row(store):
+    from radar.pipeline.checklists import canonical_item, merge_checklist, template_for
+
+    template = [row["item"] for row in template_for("trip")]
+    assert canonical_item("Transporte de ida reservado", template) == "outbound transport booked"
+    assert canonical_item("Alojamiento reservado para cada noche", template) == "lodging booked for every night of the stay"
+    assert canonical_item("Facturación online", template) == "online check-in (airlines open it about 24h before departure)"
+    assert canonical_item("Transporte local o traslados organizados", template) == "local transport or transfers arranged"
+    assert canonical_item("Documentación de viaje válida para el destino", template) == "travel documents valid for the destination"
+    assert canonical_item("Seguro de viaje contratado", template) == "seguro de viaje contratado"  # genuinely new
+    merged = merge_checklist(template_for("trip"), [
+        {"item": "Transporte de ida reservado", "status": "done", "note": "IB8832"},
+        {"item": "Facturación online", "status": "missing", "note": "abre 24 h antes"},
+        {"item": "Seguro de viaje contratado", "status": "unknown", "note": ""},
+    ])
+    assert [row["item"].lower() for row in merged] == template + ["seguro de viaje contratado"]  # a new item keeps its own wording
+    assert {row["item"]: row["status"] for row in merged}["outbound transport booked"] == "done"
+    assert {row["item"]: row["status"] for row in merged}["online check-in (airlines open it about 24h before departure)"] == "missing"
