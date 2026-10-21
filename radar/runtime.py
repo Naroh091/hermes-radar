@@ -268,7 +268,15 @@ class Runtime:
 
                 outcome = JobOutcome("failed", error="delegated jobs are disabled")
             else:
-                outcome = await self.runner.run(job, on_pid=on_pid)
+                allow = ""
+                if job.get("action_class") == "external" and job.get("proposal_id"):
+                    from .jobs.firewall import allowed_tools_for
+
+                    try:
+                        allow = allowed_tools_for((self.store.get_proposal(job["proposal_id"]) or {}).get("operation_id"))
+                    except Exception:
+                        allow = ""
+                outcome = await self.runner.run(job, on_pid=on_pid, allow=allow)
         except asyncio.CancelledError:
             from .jobs.runner import JobOutcome
 

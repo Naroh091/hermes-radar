@@ -20,6 +20,7 @@ provides_hooks:
   - subagent_stop
   - pre_gateway_dispatch
   - pre_llm_call
+  - pre_tool_call
 config_schema:
   enabled: {type: bool, default: false, description: Installed disabled by default}
   mode: {type: str, choices: [shadow, active], default: shadow, label: Mode, description: "shadow runs everything but never notifies; active delivers notices to the verified destination"}

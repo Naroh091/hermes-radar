@@ -18,6 +18,7 @@ from .config import load_config
 from .delivery.responses import respond_to_proposal
 from .delivery.telegram_ui import authorize_update, command_text, handle_callback, handle_text_reply, session_identity
 from .i18n import t
+from .jobs.firewall import guard_tool_call
 from .jobs.service import start_or_wait
 from .llm import register_aux_tasks
 from .operations import OPERATIONS, operation_catalog
@@ -532,6 +533,7 @@ def register(ctx):
     ctx.register_hook("subagent_stop", lambda **kw: capture_subagent(ctx, **kw))
     ctx.register_hook("pre_gateway_dispatch", lambda **kw: on_gateway_event(ctx, **kw))
     ctx.register_hook("pre_llm_call", lambda **kw: pending_context(ctx, **kw))
+    ctx.register_hook("pre_tool_call", lambda **kw: guard_tool_call(**kw))  # inert outside a job child
     ctx.register_platform_handler("telegram", telegram_factory(ctx))
     register_command = getattr(ctx, "register_command", None)
     if callable(register_command):

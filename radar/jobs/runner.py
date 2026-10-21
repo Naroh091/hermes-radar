@@ -2,7 +2,8 @@
 
 Each job is a child ``hermes chat`` process with a real turn budget (``--max-turns``), a real time
 budget (``--run-budget``) and a wall-clock ceiling enforced here. The child never gets to execute
-external effects: the prompt restricts it and external operations go through consent.
+external effects: the prompt restricts it, the tool firewall (``radar.jobs.firewall``, fed through the
+child's environment) refuses external tools before they run, and external operations go through consent.
 """
 from __future__ import annotations
 
@@ -14,6 +15,8 @@ import os
 import shutil
 from dataclasses import dataclass, field
 from typing import Any
+
+from .firewall import child_env as firewall_env
 
 log = logging.getLogger(__name__)
 
@@ -126,13 +129,16 @@ class JobRunner:
         # Injectable for tests: ``spawn(argv, stdin_text, timeout) -> (code, stdout, stderr)``.
         self.spawn = spawn
 
-    def _child_env(self) -> dict[str, str]:
+    def _child_env(self, job: dict[str, Any] | None = None, allow: str = "") -> dict[str, str]:
+        """The parent's environment plus the firewall's variables: the job marker, the step's class and, for a
+        consented external step, the tools it may use. Hooks stay on so the firewall runs in the child."""
         env = dict(self.env) if self.env is not None else dict(os.environ)
-        env["HERMES_RADAR_JOB"] = "1"
+        env.pop("HERMES_RADAR_JOB_ALLOW", None)
+        env.update(firewall_env((job or {}).get("action_class"), allow))
         env.setdefault("HERMES_ACCEPT_HOOKS", "1")
         return env
 
-    async def run(self, job: dict[str, Any], *, on_pid: Any = None) -> JobOutcome:
+    async def run(self, job: dict[str, Any], *, on_pid: Any = None, allow: str = "") -> JobOutcome:
         timeout = float(self.max_seconds)
         argv = build_argv(
             hermes_bin=self.hermes_bin, max_turns=self.max_turns, run_budget=int(timeout), workdir=job.get("workdir"),
@@ -144,7 +150,8 @@ class JobRunner:
             if self.spawn is not None:
                 code, stdout, stderr = await self.spawn(argv, prompt, timeout + 30.0)
             else:
-                code, stdout, stderr = await self._subprocess(argv, prompt, timeout + 30.0, job.get("workdir"), on_pid)
+                code, stdout, stderr = await self._subprocess(argv, prompt, timeout + 30.0, job.get("workdir"), on_pid,
+                                                              env=self._child_env(job, allow))
         except asyncio.TimeoutError:
             return JobOutcome("timed_out", error="time budget exhausted")
         except FileNotFoundError as exc:
@@ -167,10 +174,11 @@ class JobRunner:
         return JobOutcome(status, summary=summary, result={**final, "raw_tail": text[-2000:], "anomaly": str(anomaly or "")},
                           usage=usage, session_ref=session_ref, error=str(anomaly)[:300] if anomaly else None, exit_code=code)
 
-    async def _subprocess(self, argv: list[str], stdin_text: str, timeout: float, cwd: str | None, on_pid: Any) -> tuple[int, str, str]:
+    async def _subprocess(self, argv: list[str], stdin_text: str, timeout: float, cwd: str | None, on_pid: Any,
+                          env: dict[str, str] | None = None) -> tuple[int, str, str]:
         process = await asyncio.create_subprocess_exec(
             *argv, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-            cwd=cwd if cwd and os.path.isdir(cwd) else None, env=self._child_env(), start_new_session=True,
+            cwd=cwd if cwd and os.path.isdir(cwd) else None, env=env if env is not None else self._child_env(), start_new_session=True,
         )
         if on_pid is not None:
             try:
