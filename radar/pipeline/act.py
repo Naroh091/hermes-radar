@@ -379,6 +379,8 @@ def apply(
     conversation = bool(session_of(signals))
     if (conversation or owner_authored(signals, config)) and (terminal or escalation == "inform") and not owner_followup:
         disposition = "silent"  # the owner lived it or wrote it: nothing to report back
+    if extract.get("owner_reply") and not owner_followup:
+        disposition = "silent"  # the owner answered the thread themselves: they know; the plan only updates the task
     read_steps = [p for p in plan.get("proposals") or [] if p.get("action_class") == "read" and p.get("operation") not in ("check", "inform")]
     if (escalation == "handle" and read_steps and not owner_followup and disposition != "silent"
             and may_auto_run(config.get("trust") or {}, "read", kind=task.get("kind"), operation_id=read_steps[0].get("operation") or None)):

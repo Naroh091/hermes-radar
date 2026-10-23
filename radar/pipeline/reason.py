@@ -100,6 +100,10 @@ an "ask" to the owner (see 5), and the task continues from their answer.
    decide or learn, when the owner already knows (they wrote the message, took the decision, lived the
    conversation) or when the fulfilled expectation needs no comment. Do not interrupt to confirm what the
    owner did; do not interrupt twice for the same thing.
+   bundle.owner_reply means the owner themselves wrote in the thread (to the reporter, to a colleague): they
+   already know what they said. Never tell them about it; withdraw any question their words answer (who is in
+   charge, whether to reply, what to send) and any reply step; mark reporter-facing checklist items done; move
+   the task to waiting when they now wait for someone else, or done when their message settles it.
 7. message: one to three sentences for the owner (under 500 characters): what is going on and why it matters.
    A conversation bundle is a chat the owner had with their agent: that agent already acts and reports
    inside it, and the owner was there. Record only what the conversation left pending for later

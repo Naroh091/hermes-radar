@@ -66,22 +66,48 @@ def _synthetic_extract_from_reply(signal: dict[str, Any], task: dict[str, Any]) 
     }
 
 
+def _synthetic_extract_from_owner_mail(signal: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
+    """The owner wrote in the thread themselves (a reply to the reporter, a message to a colleague): the task
+    moves on, nothing is told back to them, and the planner judges what their words settle."""
+    meta = signal.get("meta") or {}
+    return {
+        "relevant": True, "category": task.get("kind", "other"), "title": task.get("title", ""),
+        "summary": signal.get("snippet", ""), "disposition": "silent", "reason": "owner_reply",
+        "urgency": "low", "impact": "low", "risk_flags": [],
+        "entities": {}, "expectations": [], "facts_learned": [], "proposed_reply": "",
+        "keep_full_content": False, "needs_thread": False,
+        "owner_reply": {"text": signal.get("snippet", ""), "at": signal.get("occurred_at", ""), "to": str(meta.get("to") or ""), "subject": signal.get("title", "")},
+    }
+
+
 def _synthetic_extract(signal: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
     meta = signal.get("meta") or {}
     if signal.get("kind") == "user_reply":
         return _synthetic_extract_from_reply(signal, task)
     if meta.get("refresh"):
         return _synthetic_extract_from_refresh(signal, task)
+    if signal.get("kind") == "email" and meta.get("owner_sent"):
+        return _synthetic_extract_from_owner_mail(signal, task)
     return _synthetic_extract_from_job(signal, task)
 
 
-def _bound_task_id(signals: list[dict[str, Any]]) -> str:
+def _bound_task_id(signals: list[dict[str, Any]], store: Any = None) -> str:
     """The task a bundle already belongs to: job and cron results, the owner's answer to one of its questions,
-    or a refresh of the task's own artifact."""
+    a refresh of the task's own artifact, or mail the owner themselves sent in a thread an open task follows
+    (judged on its own, their «ya lo miramos» looked like noise and the task never learned they had answered)."""
     if not signals:
         return ""
     if all(s.get("kind") in ("job_result", "cron_result", "user_reply") for s in signals) or all((s.get("meta") or {}).get("refresh") for s in signals):
         return str((signals[0].get("meta") or {}).get("task_id") or "")
+    if store is not None and all(s.get("kind") == "email" and (s.get("meta") or {}).get("owner_sent") for s in signals):
+        group_key = str(signals[-1].get("group_key") or "")
+        if group_key.startswith("thread:") and hasattr(store, "tasks_for_group"):
+            try:
+                tracked = store.tasks_for_group(group_key, statuses=correlate.OPEN_STATUSES, limit=1)
+            except Exception:
+                tracked = []
+            if tracked:
+                return str(tracked[0]["id"])
     return ""
 
 
@@ -135,7 +161,7 @@ async def process_bundle(rt: Any, bundle: dict[str, Any], now_dt: datetime) -> d
                             counts_attempt=False)  # waiting for the owner to finish talking is not a failed attempt
         summary["deferred"] = "session_active"
         return summary
-    bound = _bound_task_id(signals)
+    bound = _bound_task_id(signals, store)
     if bound:
         try:
             existing_task = store.get_task(bound)
@@ -214,6 +240,8 @@ async def process_bundle(rt: Any, bundle: dict[str, Any], now_dt: datetime) -> d
     )
     if existing_task is not None:
         _settle_draft(store, existing_task["id"], kept[-1], now)
+        if extracted.get("owner_reply"):
+            act.forget_draft(store, existing_task["id"], now)  # the owner wrote the reply themselves: the drafted one is moot
     if owner_followup and not result.proposals:
         from ..delivery.dispatch import notify_job_result
 

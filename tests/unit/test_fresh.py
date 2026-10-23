@@ -78,6 +78,41 @@ def test_the_owners_sent_mail_counts_only_where_a_task_is_waiting(store):
     assert "Varnish" in pending[0]["snippet"]
 
 
+def test_the_owners_reply_moves_the_task_on_without_a_word_back(store, tmp_path):
+    from conftest import FakeLlm, plan_answer
+
+    from radar.pipeline.process import process_bundle
+
+    cfg = active_config()
+    verify_destination(store)
+    source = _source(store, cfg, Provider([]))
+    _tracked_task(store, source)
+    store.update_task("t1", now=NOW_S, bump_version=False, entities={"draft": {"text": "Hola Sebastián, lo miramos.", "ref": "", "at": NOW_S}})
+    reply = _message("s2", f"David <{OWNER}>", "Re: problema con carga de borrador", "Ya lo hemos mirado: era Varnish, lo reinicio ahora.", epoch=1760867300)
+    assert source.ingest_message(reply, NOW) == "added"
+    plan = plan_answer(task_match={"decision": "advances", "task_id": "t1", "why": "the owner answered Sebastián"},
+                       task={**plan_answer()["task"], "kind": "work_item", "title": "Fallo al cargar borrador", "status": "waiting"},
+                       checklist=[], proposals=[], notify={"disposition": "notify_now", "urgency": "now", "importance": "high", "reason": "x"},
+                       message="Has respondido a Sebastián.", escalation={"decision": "inform", "why": "the owner knows"})
+    llm = FakeLlm({"radar.plan": [plan]})
+    rt = Runtime(FakeContext(cfg, llm=llm), store, cfg, worker_id="w", clock=lambda: NOW, hermes_home=str(tmp_path))
+    [bundle] = store.claim_signal_bundles(NOW_S, "2026-10-19T10:10:00Z", 5)
+    outcome = asyncio.run(process_bundle(rt, bundle, NOW))
+    assert outcome["task_id"] == "t1" and outcome["disposition"] == "silent"  # bound to the task, no extraction call, nothing sent
+    assert [c["purpose"] for c in llm.calls] == ["radar.plan"] and '"owner_reply"' in llm.calls[0]["input"][0]["text"]
+    assert store.get_proposal("ask")["status"] == "expired" and store.get_proposal("ask")["params"]["superseded_by"] == "replan"
+    task = store.get_task("t1")
+    assert task["status"] == "waiting" and "draft" not in task["entities"]
+    assert store.list_signals(group_key=f"thread:{OWNER}:th-1", status="pending") == [] and store.list_outbox(limit=5) == []
+    assert "owner_reply" in reason_prompt()
+
+
+def reason_prompt() -> str:
+    from radar.pipeline.reason import PLAN_PROMPT
+
+    return PLAN_PROMPT
+
+
 def test_a_message_about_a_thread_that_moved_waits_and_a_withdrawn_one_never_goes_out(store, tmp_path):
     cfg = active_config()
     verify_destination(store)
