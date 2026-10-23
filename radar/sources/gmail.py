@@ -71,6 +71,16 @@ class GmailSource(SourceAdapter):
             "content_ref": f"gmail:{self.address}:{message.id}",
         }
 
+    @staticmethod
+    def _merge(full: MailMessage, listed: MailMessage) -> MailMessage:
+        """The read message, with what only the search listing knew (date, epoch, sender) filled in."""
+        full.epoch = full.epoch or listed.epoch
+        full.date = full.date or listed.date
+        full.subject = full.subject or listed.subject
+        full.sender = full.sender or listed.sender
+        full.thread_id = full.thread_id or listed.thread_id
+        return full
+
     def owner_sent(self, message: MailMessage) -> bool:
         return bool(self.address) and address_of(message.sender) == self.address.strip().lower()
 
@@ -88,8 +98,18 @@ class GmailSource(SourceAdapter):
         if self.store.signal_exists(self.id, message.id):
             return "duplicate"
         head = self._signal_from(message, now_dt, with_body=False)
-        if head["meta"].get("owner_sent") and not self._tracked(head["group_key"]):
-            decision = TriageDecision(False, "owner_sent_untracked")  # the owner's own mail matters only where a task is waiting
+        if head["meta"].get("owner_sent"):
+            if not message.thread_id and read_body:
+                # A search listing carries no thread id; only the thread tells whether a task is waiting on it.
+                try:
+                    message = self._merge(self.provider.read(message.id), message)
+                    head = self._signal_from(message, now_dt, with_body=False)
+                except ProviderError as exc:
+                    log.warning("gmail read failed for %s: %s", message.id, exc)
+            if not self._tracked(head["group_key"]):
+                decision = TriageDecision(False, "owner_sent_untracked")  # the owner's own mail matters only where a task is waiting
+            else:
+                decision = triage_signal(head, self.preferences, self.config)
         else:
             decision = triage_signal(head, self.preferences, self.config)
         now = iso(now_dt)
@@ -104,11 +124,7 @@ class GmailSource(SourceAdapter):
         full = message
         if read_body and not message.body:
             try:
-                full = self.provider.read(message.id)
-                full.epoch = full.epoch or message.epoch
-                full.date = full.date or message.date
-                full.subject = full.subject or message.subject
-                full.sender = full.sender or message.sender
+                full = self._merge(self.provider.read(message.id), message)
             except ProviderError as exc:
                 log.warning("gmail read failed for %s: %s", message.id, exc)
                 full = message

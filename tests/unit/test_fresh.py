@@ -26,9 +26,11 @@ class Provider(MailProvider):
 
     def search(self, query, *, max_results=20):
         self.queries.append(query)
-        return list(self.messages)
+        # Like the real listing: no thread id and no body until the message is read.
+        return [MailMessage(id=m.id, subject=m.subject, sender=m.sender, date=m.date, epoch=m.epoch) for m in self.messages]
 
     def read(self, message_id):
+        self.reads = getattr(self, "reads", []) + [message_id]
         return next(m for m in self.messages if m.id == message_id)
 
 
@@ -61,16 +63,19 @@ def test_the_owners_sent_mail_counts_only_where_a_task_is_waiting(store):
     provider = Provider([])
     source = _source(store, cfg, provider)
     assert "{in:inbox in:sent}" in source._query(NOW) and address_of("David <A@Example.org>") == OWNER
-    # A mail the owner sent in a thread nobody tracks is noted and ignored without reading it.
+    # A mail the owner sent in a thread nobody tracks is noted and ignored.
     unrelated = _message("s1", f"David <{OWNER}>", "Comida del viernes", "¿Nos vemos a las 14?", thread="th-9")
     assert source.ingest_message(unrelated, NOW) == "ignored"
     assert store.list_signals(group_key=f"thread:{OWNER}:th-9")[0]["triage_reason"] == "owner_sent_untracked"
-    # Their reply in a tracked thread is a signal the planner will judge, marked as the owner's own.
+    # Their reply in a tracked thread is a signal the planner will judge, marked as the owner's own. The search
+    # listing does not say which thread a message belongs to, so the message is read first (that is how the real
+    # reply of 2026-10-23 was first filed under a loose key and ignored).
     _tracked_task(store, source)
-    reply = _message("s2", f"David <{OWNER}>", "Re: problema con carga de borrador", "Ya lo estamos mirando, era Varnish.", epoch=1760867300)
-    assert source.ingest_message(reply, NOW) == "added"
+    provider.messages = [_message("s2", f"David <{OWNER}>", "Re: problema con carga de borrador", "Ya lo estamos mirando, era Varnish.", epoch=1760867300)]
+    assert source.sync(NOW).added == 1 and provider.reads == ["s2"]
     pending = store.list_signals(group_key=f"thread:{OWNER}:th-1", status="pending")
     assert len(pending) == 1 and pending[0]["meta"]["owner_sent"] is True and pending[0]["meta"]["sender"].endswith(f"<{OWNER}>")
+    assert "Varnish" in pending[0]["snippet"]
 
 
 def test_a_message_about_a_thread_that_moved_waits_and_a_withdrawn_one_never_goes_out(store, tmp_path):
