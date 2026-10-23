@@ -123,6 +123,28 @@ def test_resolve_reply_routes_to_the_referenced_proposal(store):
     assert later["outcome"] == "snoozed" and store.get_proposal(ids[0])["status"] == "snoozed"
 
 
+def test_numbers_point_at_what_was_shown_and_never_slide(store):
+    cfg = active_config()
+    ids = _seed(store, n=3)
+    verify_destination(store)
+    dispatch(store, cfg, NOW)
+    row = {**store.list_outbox()[0], "kind": "digest", "task_id": None}  # a reminder with three numbered decisions
+    assert classify("12 no") == {"intent": "reject", "proposal_index": 12} and classify("3 luego")["intent"] == "later"
+    assert classify("2026")["proposal_index"] == 0 and classify("12")["intent"] == "approve"
+    reply = lambda intent, index=0: resolve_reply(store, cfg, outbox_row=row, intent={"intent": intent, "proposal_index": index}, actor="telegram:7", now_dt=NOW)  # noqa: E731
+    assert reply("approve", 2)["outcome"] == "accepted" and store.get_proposal(ids[1])["status"] == "accepted"
+    assert reply("reject")["outcome"] == "which_one" and {store.get_proposal(pid)["status"] for pid in (ids[0], ids[2])} == {"sent"}  # a bare «no» with two open: which?
+    assert reply("approve", 1)["outcome"] == "accepted" and store.get_proposal(ids[0])["status"] == "accepted"  # «1» is still the first one shown
+    answered = reply("approve", 2)
+    assert answered["outcome"] == "already_answered" and "Propuesta 1" in answered["text"]
+    assert reply("approve", 7)["outcome"] == "unknown_number"
+    assert reply("later", 3)["outcome"] == "snoozed" and store.get_proposal(ids[2])["status"] == "snoozed" and store.get_task("t1")["status"] == "snoozed"
+    single = {**row, "payload": {**row["payload"], "proposal_ids": ids[:1]}}
+    store.set_proposal_status(ids[2], "pending", "2026-10-19T10:05:00Z")
+    assert resolve_reply(store, cfg, outbox_row={**single, "payload": {**row["payload"], "proposal_ids": ids[2:]}},
+                         intent={"intent": "reject", "proposal_index": 0}, actor="telegram:7", now_dt=NOW)["outcome"] == "declined"  # one decision: no number needed
+
+
 def test_telegram_send_falls_back_to_plain_text_and_sends_documents(tmp_path):
     calls = []
 

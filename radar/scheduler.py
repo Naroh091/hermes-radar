@@ -169,6 +169,12 @@ class Scheduler:
                 stats["jobs"] = await self._run_jobs(now_dt)
         stats["expired"] = self.store.expire_proposals(now)
         self.store.wake_snoozed_proposals(now)
+        try:
+            from .pipeline.decay import run as decay
+
+            stats["decayed"] = decay(self.store, self.config, now_dt)
+        except Exception as exc:
+            log.warning("radar decay failed: %s", exc)
         if self.runtime is not None and not paused:
             from .delivery.dispatch import dispatch, select_reminder
             from .delivery.remind import compose

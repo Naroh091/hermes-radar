@@ -1443,6 +1443,62 @@ class Store:
             )
         return cursor.rowcount
 
+    def decay_proposals(self, now: str, *, unanswered_before: str, news_before: str) -> dict[str, list[str]]:
+        """What the owner never answered and what stopped being news.
+
+        A decision sent before ``unanswered_before`` and still unanswered expires with ``expired_reason`` unanswered
+        (its task is returned so the caller can park it); a piece of news that was never delivered by ``news_before``,
+        or stayed sent, expires as stale. Nothing is re-asked from here."""
+        unanswered: list[str] = []
+        stale: list[str] = []
+        task_ids: list[str] = []
+        with self.transaction() as db:
+            rows = db.execute(
+                """SELECT id, task_id, operation_id, params_json, status, created_at, updated_at FROM proposals
+                   WHERE profile_key=? AND owner_id=? AND status IN ('sent','pending')""",
+                self._scope_values,
+            ).fetchall()
+            for row in rows:
+                try:
+                    params = json.loads(row["params_json"] or "{}")
+                except json.JSONDecodeError:
+                    params = {}
+                if not isinstance(params, dict):
+                    params = {}
+                news = row["operation_id"] == "inform" and not params.get("ask")
+                if news:
+                    if row["status"] == "pending" and (str(row["created_at"] or "") > news_before or str(params.get("deliver_after") or "") > now):
+                        continue
+                    if row["status"] == "sent" and str(row["updated_at"] or "") > news_before:
+                        continue
+                    reason, bucket = "stale_news", stale
+                elif row["status"] == "sent" and str(row["updated_at"] or "") <= unanswered_before:
+                    reason, bucket = "unanswered", unanswered
+                    if row["task_id"] and row["task_id"] not in task_ids:
+                        task_ids.append(row["task_id"])
+                else:
+                    continue
+                params["expired_reason"] = reason
+                db.execute(
+                    """UPDATE proposals SET status='expired', params_json=?, updated_at=?, revision=revision+1
+                       WHERE profile_key=? AND owner_id=? AND id=?""",
+                    (canonical_json(params), now, *self._scope_values, row["id"]),
+                )
+                bucket.append(row["id"])
+        return {"unanswered": unanswered, "stale_news": stale, "task_ids": task_ids}
+
+    def park_task(self, task_id: str, *, until: str, now: str, reason: str = "unanswered") -> bool:
+        """Put a task to sleep until ``until`` without closing it: the owner did not answer, so nothing is asked
+        again until then (or until a new signal reopens it). Its review timers are cancelled."""
+        task = self.get_task(task_id)
+        if task.get("status") in ("done", "abandoned", "expired"):
+            return False
+        self.update_task(task_id, now=now, bump_version=False, snoozed_until=until, next_review_at=None)
+        if task.get("status") != "snoozed":
+            self.set_task_status(task_id, "snoozed", now=now, reason=reason)
+        self.cancel_task_followups(task_id, now)
+        return True
+
     def wake_snoozed_proposals(self, now: str) -> int:
         with self.transaction() as db:
             cursor = db.execute(

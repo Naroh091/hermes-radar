@@ -50,9 +50,12 @@ def classify(text: str) -> dict[str, Any]:
     if not lowered:
         return {"intent": "unclear"}
     index = 0
-    number = re.match(r"^\s*(\d)\b", lowered)
+    number = re.match(r"^\s*(\d{1,2})(?!\d)", lowered)  # «3», «12 no», «3 luego»; never a year
     if number:
         index = int(number.group(1))
+        lowered = lowered[number.end():].strip(" .,;:)-")  # the order is what follows the number
+        if not lowered:
+            return {"intent": "approve", "proposal_index": index}
     if _DONE.search(lowered):
         return {"intent": "done", "proposal_index": index}
     if _PREF.search(lowered):

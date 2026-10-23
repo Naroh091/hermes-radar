@@ -322,19 +322,38 @@ def resolve_reply(
     store: Any, config: dict[str, Any], *, outbox_row: dict[str, Any], intent: dict[str, Any], actor: str,
     now_dt: datetime, note: str = "",
 ) -> dict[str, Any]:
-    """Map a free-text reply to a notice onto its proposals."""
+    """Map a free-text reply to a notice or a reminder onto its proposals.
+
+    A number refers to the position in the message as it was shown, whatever has been answered since; a
+    number that is already settled or does not exist says so instead of landing on another step. Without a
+    number, a reminder with several open decisions asks which one; a notice about one task keeps its old
+    manners (the first open step, or every step for a plain «no»)."""
     language = config.get("owner", {}).get("language", "es")
     payload = outbox_row.get("payload") or {}
     proposal_ids = [pid for pid in payload.get("proposal_ids") or [] if isinstance(pid, str)]
     open_ids = [pid for pid in proposal_ids if _is_open(store, pid)]
     kind = intent.get("intent")
     index = int(intent.get("proposal_index") or 0)
-    target = open_ids[index - 1] if 0 < index <= len(open_ids) else (open_ids[0] if open_ids else None)
+    reminder = outbox_row.get("kind") == "digest"
+    target: str | None = None
+    if index:
+        if index > len(proposal_ids):
+            return {"outcome": "unknown_number", "text": t(language, "reply_unknown_number", n=index, count=len(proposal_ids))}
+        target = proposal_ids[index - 1]
+        if not _is_open(store, target):
+            return {"outcome": "already_answered", "text": t(language, "reply_already_answered", n=index, title=_title(store, target))}
+    elif len(open_ids) == 1 or (open_ids and not reminder):
+        target = open_ids[0]
+    elif open_ids and kind in ("approve", "reject", "later", "done"):
+        return {"outcome": "which_one", "text": t(language, "reply_which_one", count=len(proposal_ids))}
     task_id = outbox_row.get("task_id") or payload.get("task_id")
+    if target and (index or not task_id):
+        task_id = _task_of(store, target) or task_id
     if kind == "approve" and target:
         return respond_to_proposal(store, config, proposal_id=target, option=_answer(store, target, "yes"), actor=actor, now_dt=now_dt, note=note)
     if kind == "reject":
-        results = [respond_to_proposal(store, config, proposal_id=pid, option=_answer(store, pid, "no"), actor=actor, now_dt=now_dt, note=note) for pid in (open_ids if index == 0 else [target])]
+        targets = [target] if (target and (index or reminder)) else open_ids  # a bare «no» to a notice about one task declines its steps
+        results = [respond_to_proposal(store, config, proposal_id=pid, option=_answer(store, pid, "no"), actor=actor, now_dt=now_dt, note=note) for pid in targets]
         return results[0] if results else {"outcome": "stale", "text": t(language, "unknown_callback")}
     if kind == "later" and task_id:
         return act_on_task(store, config, task_id=task_id, action="later", actor=actor, now_dt=now_dt)
@@ -363,6 +382,20 @@ def _answer(store: Any, proposal_id: str, word: str) -> str:
     if operation == "check":
         return "ok" if word == "yes" else "wrong"
     return "do" if word == "yes" else "no"
+
+
+def _title(store: Any, proposal_id: str) -> str:
+    try:
+        return str(store.get_proposal(proposal_id).get("title") or "")
+    except KeyError:
+        return ""
+
+
+def _task_of(store: Any, proposal_id: str) -> str | None:
+    try:
+        return store.get_proposal(proposal_id).get("task_id")
+    except KeyError:
+        return None
 
 
 def _is_open(store: Any, proposal_id: str) -> bool:
