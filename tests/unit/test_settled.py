@@ -7,7 +7,8 @@ from datetime import datetime, timedelta, timezone
 from conftest import NOW, FakeContext, FakeLlm, active_config, extract_answer, plan_answer, verify_destination
 
 from radar.delivery.dispatch import dispatch
-from radar.delivery.notice import build_digest, build_notice
+from radar.delivery.dispatch import build_reminder
+from radar.delivery.notice import build_notice
 from radar.pipeline import act, extract as extract_step, reason
 from radar.pipeline.process import process_bundle
 from radar.pipeline.refresh import SOURCE_ID, pr_reference, refresh_before_digest
@@ -71,8 +72,9 @@ def test_a_decision_with_no_step_still_reaches_the_owner(store):
     assert "¿Positiva, neutra o negativa?" in payload["text"] and "Responde a este mensaje" in payload["text"]
     assert all("Vale" not in button["label"] for row in payload["buttons"] for button in row)
     assert payload["buttons"][-1][0]["data"] == f"pt:{result.task_id}:mute"
-    digest = build_digest([(store.get_task(result.task_id), [item])], language="es")
-    assert digest["proposal_ids"] == [item["id"]] and digest["buttons"] == []
+    reminder = build_reminder({"items": [{"task": store.get_task(result.task_id), "decision": item, "news": []}], "news": []}, "Por cierto…", language="es")
+    assert reminder["proposal_ids"] == [item["id"]] and reminder["task_id"] == result.task_id
+    assert reminder["buttons"] == [[{"label": "⏰ Recuérdamelo mañana", "data": f"pt:{result.task_id}:later"}]]  # answered in words, or later
     # A security alert only the owner can act on interrupts right away, with no step to offer.
     urgent = plan_answer(task={**plan_answer()["task"], "kind": "check", "title": "Dos secretos detectados en hermes-radar", "status": "needs_user"},
                          proposals=[], checks=[], escalation={"decision": "ask", "why": "credentials may be live"},

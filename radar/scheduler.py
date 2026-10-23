@@ -170,14 +170,26 @@ class Scheduler:
         stats["expired"] = self.store.expire_proposals(now)
         self.store.wake_snoozed_proposals(now)
         if self.runtime is not None and not paused:
-            from .delivery.dispatch import dispatch
+            from .delivery.dispatch import dispatch, select_reminder
+            from .delivery.remind import compose
 
             try:
                 stats["refreshed"] = await self.runtime.refresh_artifacts(now_dt)
             except Exception as exc:
                 log.warning("radar refresh before digest failed: %s", exc)
+            reminder = None
             try:
-                stats["dispatched"] = dispatch(self.store, self.config, now_dt)
+                reminder = select_reminder(self.store, self.config, now_dt)
+                if reminder:  # the model writes it as an assistant would; the template stands in when it cannot
+                    reminder["text"] = await compose(
+                        getattr(self.runtime, "gate", None), items=reminder["items"], language=self.config.get("owner", {}).get("language", "es"),
+                        backlog=reminder["backlog"], first_of_day=reminder["first_of_day"],
+                        subject_id=(reminder["items"][0].get("task") or {}).get("id") if reminder["items"] else None,
+                    )
+            except Exception as exc:
+                log.warning("radar reminder not composed: %s", exc)
+            try:
+                stats["dispatched"] = dispatch(self.store, self.config, now_dt, reminder=reminder)
             except Exception as exc:
                 log.warning("radar dispatch failed: %s", exc)
         stats["delivered"] = await self._deliver_outbox(now_dt)

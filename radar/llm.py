@@ -23,6 +23,7 @@ SLOTS: dict[str, tuple[str, str]] = {
     "preference": ("Radar: preferences", "Turn one owner reply into a scoped attention preference."),
     "pattern": ("Radar: patterns", "Name recurring patterns and propose automations."),
     "card": ("Radar: cards", "Fill presentation templates for the desktop panel."),
+    "remind": ("Radar: reminders", "Write the owner's reminder: one pending thing, in prose, as an assistant would say it in passing."),
 }
 
 

@@ -32,6 +32,9 @@ CONFIG_DEFAULTS: dict[str, Any] = {
         "batch_minutes": 30,
         "digest_times": ["09:00", "14:00", "19:00"],
         "reminder_cooldown_hours": 24,
+        "reminder_items": 1,
+        "unanswered_hours": 48,
+        "interrupt_cooldown_hours": 3,
     },
     "limits": {
         "events_per_source_cycle": 100,
@@ -80,7 +83,8 @@ _NESTED_KEYS = {
     "observation": {"local_sessions", "historical_import", "state_db_poll_seconds", "debounce_seconds", "session_quiet_minutes", "session_auto_jobs"},
     "context": {"memory", "sessions", "timeout_seconds", "max_chars", "session_results", "memory_tool"},
     "scheduler": {"tick_seconds", "max_concurrent_checks"},
-    "notifications": {"enabled", "quiet_start", "quiet_end", "daily_limit", "batch_minutes", "digest_times", "reminder_cooldown_hours"},
+    "notifications": {"enabled", "quiet_start", "quiet_end", "daily_limit", "batch_minutes", "digest_times", "reminder_cooldown_hours",
+                      "reminder_items", "unanswered_hours", "interrupt_cooldown_hours"},
     "limits": {"events_per_source_cycle", "checks_per_day", "llm_calls_per_day", "llm_input_tokens", "llm_output_tokens", "jobs_per_day", "max_bundles_per_tick", "signal_attempts"},
     "retention": {"observations_days", "results_days", "audit_days", "snippet_chars", "full_content_days", "full_content_kinds", "signals_days"},
     "mutations": {"enabled", "require_per_action_consent"},
@@ -248,7 +252,7 @@ def validate_config(value: Any) -> tuple[bool, list[str]]:
 
     for section, fields in {
         "scheduler": ("tick_seconds", "max_concurrent_checks"),
-        "notifications": ("daily_limit", "batch_minutes", "reminder_cooldown_hours"),
+        "notifications": ("daily_limit", "batch_minutes", "reminder_cooldown_hours", "reminder_items", "unanswered_hours", "interrupt_cooldown_hours"),
         "limits": ("events_per_source_cycle", "checks_per_day", "llm_calls_per_day", "llm_input_tokens", "llm_output_tokens", "jobs_per_day", "max_bundles_per_tick", "signal_attempts"),
         "retention": ("observations_days", "results_days", "audit_days", "snippet_chars", "full_content_days", "signals_days"),
         "jobs": ("max_concurrent", "max_turns", "max_seconds", "max_auto_per_task"),

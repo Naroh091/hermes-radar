@@ -11,7 +11,7 @@ from ..jobs.service import start_or_wait
 from ..trust import describe, level_summary
 from .feedback import classify
 from .dispatch import draft_document
-from .notice import CALLBACK_PREFIX, DRAFT_INLINE, MAX_LABEL, TASK_PREFIX, edited_text, fit, proposal_buttons, task_buttons
+from .notice import CALLBACK_PREFIX, DRAFT_INLINE, MAX_LABEL, TASK_PREFIX, decision_buttons, edited_text, fit, proposal_buttons, task_buttons
 from .responses import OPEN_PROPOSAL, act_on_task, resolve_reply, respond_to_proposal
 
 log = logging.getLogger(__name__)
@@ -64,6 +64,8 @@ def remaining_keyboard(rt: Any, outbox_row: dict[str, Any] | None) -> list[list[
     rows: list[list[dict[str, str]]] = []
     task_id = outbox_row.get("task_id") or payload.get("task_id")
     open_count = 0
+    reminder = outbox_row.get("kind") == "digest"
+    several = len(payload.get("proposal_ids") or []) > 1
     for index, proposal_id in enumerate(payload.get("proposal_ids") or [], 1):
         try:
             proposal = rt.store.get_proposal(proposal_id)
@@ -71,11 +73,20 @@ def remaining_keyboard(rt: Any, outbox_row: dict[str, Any] | None) -> list[list[
             continue
         if proposal.get("status") not in OPEN_PROPOSAL:
             continue
-        row = proposal_buttons(proposal, language)
-        if len(payload.get("proposal_ids") or []) > 1:
-            row[0]["label"] = fit(f"{index}️⃣ {row[0]['label']}", MAX_LABEL)
+        if reminder:
+            row = decision_buttons(proposal, language, index=index if several else 0)
+            if not row:
+                continue
+        else:
+            row = proposal_buttons(proposal, language)
+            if several:
+                row[0]["label"] = fit(f"{index}️⃣ {row[0]['label']}", MAX_LABEL)
         rows.append(row)
         open_count += 1
+    if reminder:
+        if task_id and open_count and not several:
+            rows.append([{"label": t(language, "btn_later"), "data": f"pt:{task_id}:later"[:64]}])
+        return rows
     if task_id and open_count:
         try:
             task = rt.store.get_task(task_id)

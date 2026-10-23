@@ -449,19 +449,24 @@ def pending_context(ctx, **kwargs):
         if cfg is None or str(kwargs.get("platform") or "") in {"cron", "webhook"}:
             return None
         store = _store(ctx)
-        proposals = store.list_proposals(statuses=("pending", "sent"), limit=8)
-        if not proposals:
-            return None
-        lines = ["[radar] Pending proposals the owner may be referring to (resolve them with the radar_resolve tool):"]
-        for proposal in proposals:
-            title = proposal.get("title", "")
-            task_title = ""
+        from .trust import needs_consent
+
+        lines = ["[radar] Pending decisions the owner may be referring to (resolve them with the radar_resolve tool):"]
+        for proposal in store.list_proposals(statuses=("pending", "sent"), limit=60, newest=True):
+            task = None
             if proposal.get("task_id"):
                 try:
-                    task_title = store.get_task(proposal["task_id"]).get("title", "")
+                    task = store.get_task(proposal["task_id"])
                 except KeyError:
-                    task_title = ""
-            lines.append(f"- {proposal['id']}: {title}" + (f" (task: {task_title})" if task_title else ""))
+                    task = None
+            if not needs_consent(cfg, task, proposal):
+                continue  # the assistant's own queued work is not something the owner answers
+            task_title = (task or {}).get("title", "")
+            lines.append(f"- {proposal['id']}: {proposal.get('title', '')}" + (f" (task: {task_title})" if task_title else ""))
+            if len(lines) > 8:
+                break
+        if len(lines) == 1:
+            return None
         text = "\n".join(lines)
         return {"context": text[:1500]}
     except Exception as exc:

@@ -7,7 +7,7 @@ from conftest import NOW, active_config, verify_destination
 
 from radar.delivery.dispatch import dispatch
 from radar.delivery.feedback import classify
-from radar.delivery.notice import build_digest, build_notice
+from radar.delivery.notice import build_notice, decision_buttons
 from radar.delivery.responses import act_on_task, resolve_reply, respond_to_proposal
 from radar.scheduler import Scheduler
 from radar.transports import DeliveryReceipt, TransportRegistry, telegram_send
@@ -36,8 +36,7 @@ def test_notice_and_digest_formatting_with_buttons(store):
     assert notice["buttons"][-2][1]["data"] == "pt:t1:later" and notice["buttons"][-1][0]["data"] == "pt:t1:mute"
     assert "<b>Puedo hacer:</b>" in notice["text"] and "Responde a este mensaje" in notice["text"]
     assert notice["buttons"][0][0]["label"].startswith("1️⃣")
-    digest = build_digest([(task, proposals)], language="en")
-    assert "Pending summary" in digest["text"] and digest["proposal_ids"] == ids
+    assert decision_buttons(proposals[0], "en")[0]["data"] == "pa:p0:do" and decision_buttons(proposals[1], "en", index=2)[0]["label"].startswith("2️⃣")
 
 
 def test_dispatch_enqueues_one_notice_per_task_and_respects_daily_limit(store):
@@ -287,12 +286,10 @@ def test_notice_shows_who_wrote_when_and_what_in_the_email_thread(store):
     assert "<b>Correo:</b> Bernd Müller · 19 oct 11:02 · 3 mensajes en el hilo · con tú" in text
     assert "<i>Asunto: Bug uploading photos</i>" in text and "<blockquote>It still happens today" in text and "wrote:" not in text
     assert text.index("Bernd sigue viendo") < text.index("<b>Correo:</b>") < text.index("<b>Puedo hacer:</b>")
-    # The account is named only when the owner watches several mailboxes; the digest keeps just the header line.
+    # The account is named only when the owner watches several mailboxes.
     cfg["sources"] = [{"id": "a", "kind": "gmail"}, {"id": "b", "kind": "gmail"}]
     context = thread_context(store, "t7", cfg, now_dt=NOW)
     assert context["account"] == "me@example.org"
-    digest = build_digest([(store.get_task("t7"), [store.get_proposal("p7")])], language="en", contexts={"t7": context})
-    assert "<b>Email (me@example.org):</b> Bernd Müller" in digest["text"] and "<blockquote>" not in digest["text"]
     # Helpers: quoted history is stripped, bodies without a marker stay whole, years appear only when not current.
     assert strip_quoted("Short reply. El 18 oct 2026, David escribió: hola") == "Short reply."
     assert strip_quoted("On Sat, Oct 18 David wrote: only a quote") == "On Sat, Oct 18 David wrote: only a quote"

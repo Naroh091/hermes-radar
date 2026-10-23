@@ -166,31 +166,18 @@ def _compose(task: dict[str, Any], proposals: list[dict[str, Any]], *, language:
     return "\n".join(lines), buttons, ordered
 
 
-def build_digest(groups: list[tuple[dict[str, Any], list[dict[str, Any]]]], *, language: str,
-                 contexts: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
-    lines = [f"<b>📋 {_esc(t(language, 'digest_title'))}</b>"]
-    buttons: list[list[dict[str, str]]] = []
-    proposal_ids: list[str] = []
-    counter = 0
-    for task, proposals in groups[:8]:
-        lines.extend(["", f"<b>{_icon(language, task.get('kind', 'other'))} {_esc(task.get('title'))}</b>"])
-        summary = task.get("summary") or ""
-        if summary:
-            lines.append(_esc(summary[:300]))
-        lines.extend(context_lines((contexts or {}).get(task["id"]), language=language, excerpt_cap=0))
-        for proposal in proposals[:2]:
-            counter += 1
-            lines.append(f"{counter}. {_esc(proposal.get('title'))}")
-            proposal_ids.append(proposal["id"])
-            if (proposal.get("params") or {}).get("ask"):
-                continue  # an open decision is answered by replying «la N: …», not with a button
-            row = proposal_buttons(proposal, language)
-            row[0]["label"] = fit(f"{counter}️⃣ {row[0]['label']}", MAX_LABEL)
-            buttons.append(row)
-    if counter == 0:
-        lines.append(_esc(t(language, "digest_empty")))
-    text = fit("\n".join(lines), MAX_MESSAGE)
-    return {"text": text, "parse_mode": "HTML", "buttons": buttons, "proposal_ids": proposal_ids, "kind": "digest"}
+def decision_buttons(proposal: dict[str, Any], language: str, *, index: int = 0) -> list[dict[str, str]]:
+    """The buttons of one decision in a reminder: a question's answers, or do / see it first / no for an action.
+    A decision made only in words (``params.ask``) has none; ``index`` numbers the first label when several
+    decisions travel in one message."""
+    if (proposal.get("params") or {}).get("ask"):
+        return []
+    row = proposal_buttons(proposal, language)
+    if proposal.get("action_class") == "external" and len(row) == 2:
+        row.insert(1, {"label": t(language, "btn_review_first"), "data": f"{CALLBACK_PREFIX}:{proposal['id']}:review"[:64]})
+    if index:
+        row[0]["label"] = fit(f"{index}️⃣ {row[0]['label']}", MAX_LABEL)
+    return row
 
 
 def edited_text(original: str, outcome: str) -> str:

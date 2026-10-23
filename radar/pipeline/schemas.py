@@ -148,3 +148,7 @@ PATTERN_SCHEMA = _obj(
         })),
     }
 )
+
+
+# The reminder: one short message in prose (see radar/delivery/remind.py).
+REMIND_SCHEMA = _obj({"text": _STR})

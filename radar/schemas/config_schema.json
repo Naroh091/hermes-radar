@@ -237,9 +237,12 @@
         "daily_limit",
         "digest_times",
         "enabled",
+        "interrupt_cooldown_hours",
         "quiet_end",
         "quiet_start",
-        "reminder_cooldown_hours"
+        "reminder_cooldown_hours",
+        "reminder_items",
+        "unanswered_hours"
       ],
       "properties": {
         "enabled": {
@@ -265,6 +268,18 @@
         "reminder_cooldown_hours": {
           "type": "integer",
           "default": 24
+        },
+        "reminder_items": {
+          "type": "integer",
+          "default": 1
+        },
+        "unanswered_hours": {
+          "type": "integer",
+          "default": 48
+        },
+        "interrupt_cooldown_hours": {
+          "type": "integer",
+          "default": 3
         },
         "digest_times": {
           "type": "array",

@@ -64,10 +64,10 @@ def test_the_digest_goes_out_at_its_slot_and_quiet_hours_yield_only_to_real_urge
     verify_destination(store)
     store.create_task(task_id="t1", kind="trip", title="Viaje", summary="", entities={}, expectations=[], checklist=[], now="2026-10-19T10:00:00Z")
 
-    def proposal(pid, deliver_after="", urgency="normal", params_urgency="today"):
-        store.create_task_proposal(proposal_id=pid, task_id="t1", title=f"Paso {pid}", reason_text="", action_class="read", operation_id="web.read",
-                                   params={"deliver_after": deliver_after, "urgency": params_urgency}, options=[], urgency=urgency,
-                                   expires_at="2026-10-22T10:00:00Z", fingerprint=pid, now="2026-10-19T10:00:00Z", batch_key="digest")
+    def proposal(pid, deliver_after="", urgency="normal", params_urgency="today"):  # a decision: only those travel in a reminder
+        store.create_task_proposal(proposal_id=pid, task_id="t1", title=f"¿Paso {pid}?", reason_text="", action_class="read", operation_id="ask",
+                                   params={"deliver_after": deliver_after, "urgency": params_urgency}, options=[{"id": "si", "label": "Sí"}, {"id": "no", "label": "No"}],
+                                   urgency=urgency, expires_at="2026-10-22T10:00:00Z", fingerprint=pid, now="2026-10-19T10:00:00Z", batch_key="digest")
 
     proposal("p1")
     assert dispatch(store, cfg, NOW)["digests"] == 1  # first digest ever: the morning slot is owed
