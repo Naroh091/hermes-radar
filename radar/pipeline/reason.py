@@ -81,6 +81,13 @@ an "ask" to the owner (see 5), and the task continues from their answer.
    Do not propose what is already done. existing_task.declined_by_owner lists steps the owner refused:
    never propose them again, nor rephrased variants, unless new evidence changes the situation. One
    investigation at a time: if recent_proposals shows a step still executing, do not add another read step.
+   existing_task.open_steps and each candidate's open_steps are the steps already proposed for that task and
+   still open (waiting for the owner) or running. A new plan replaces them: restate a step only if it is still
+   needed, with the same title (it is updated in place, never duplicated); a step you do not restate is
+   withdrawn. Never propose a second way of doing the same thing (two replies, a comment and a reply, a draft
+   and its sending) nor a read step while one is waiting or executing; one question per task unless two are
+   truly independent. existing_task.unanswered_by_owner lists questions the owner let expire: do not ask them
+   again unless this bundle brings something new.
 6. notify: judge urgency and importance before deciding how to reach the owner. urgency: "now" only when
    waiting costs something real (a security alert, a blocked payment, a deadline within hours, a person
    waiting for an answer today, a service down); "today" when it should be seen before the day ends (a
@@ -183,7 +190,9 @@ def build_input(
             "due_at": existing_task.get("due_at"), "entities": existing_task.get("entities") or {},
             "expectations": existing_task.get("expectations") or [], "checklist": existing_task.get("checklist") or [],
             "recent_proposals": existing_task.get("recent_proposals") or [],
+            "open_steps": existing_task.get("open_steps") or [],
             "declined_by_owner": existing_task.get("declined_by_owner") or [],
+            "unanswered_by_owner": existing_task.get("unanswered_by_owner") or [],
         }
     return json.dumps(payload, ensure_ascii=False, sort_keys=True)
 

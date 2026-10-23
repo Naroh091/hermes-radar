@@ -17,8 +17,9 @@ log = logging.getLogger(__name__)
 
 JOBS_SOURCE_ID = "local:jobs"
 NATIVE_DESTINATION = "configured:primary"
-# Blocks that clear on their own (a running job ends, the cooldown passes, the daily budget resets).
-DEFER_REASONS = frozenset({"active_job", "cooldown", "budget"})
+# Blocks that clear on their own (a running job ends, the cooldown passes, the daily budget and the per-task cap
+# reset at midnight, the owner re-enables jobs): the step waits, it is never handed to the owner as a button.
+DEFER_REASONS = frozenset({"active_job", "cooldown", "budget", "task_cap", "disabled"})
 # Blocks that never clear for this proposal.
 TERMINAL_BLOCKS = frozenset({"check", "no_task", "task_closed", "external_auto"})
 

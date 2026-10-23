@@ -37,9 +37,13 @@ def test_a_session_deferred_turn_by_turn_is_still_claimed_whole(store):
 def test_a_protected_risk_flag_keeps_news_out_of_silence_not_out_of_the_summary(store):
     cfg = config()
     risky = extract_answer(risk_flags=["financial_loss"], disposition="silent")
-    weekly = _apply(store, cfg, plan_answer(notify={"disposition": "silent", "urgency": "this_week", "importance": "normal", "reason": "x"}), extract=risky)
+    ask = {"title": "¿Reclamo el cargo?", "rationale": "", "action_class": "read", "operation": "ask", "when": "", "urgency": "normal",
+           "options": [{"id": "si", "label": "Sí, reclama"}, {"id": "no", "label": "No"}]}
+    weekly = _apply(store, cfg, plan_answer(proposals=[ask] + plan_answer()["proposals"],
+                                            notify={"disposition": "silent", "urgency": "this_week", "importance": "normal", "reason": "x"}), extract=risky)
     assert weekly.attention_reason == "protected_exception" and weekly.disposition == "digest"
-    assert {p["batch_key"] for p in store.list_proposals(task_id=weekly.task_id) if not p["params"].get("when")} == {"digest"}
+    by_operation = {p["operation_id"]: p["batch_key"] for p in store.list_proposals(task_id=weekly.task_id)}
+    assert by_operation["ask"] == "digest" and by_operation["web.read"] == "auto"  # the decision waits for the summary; the work runs by itself
     urgent = _apply(store, cfg, plan_answer(task={**plan_answer()["task"], "title": "Cargo no reconocido"},
                                             notify={"disposition": "notify_now", "urgency": "now", "importance": "high", "reason": "x"}), extract=risky)
     assert urgent.disposition == "notify_now"
@@ -48,16 +52,19 @@ def test_a_protected_risk_flag_keeps_news_out_of_silence_not_out_of_the_summary(
 def test_an_unanswered_notice_holds_what_comes_next_for_the_summary(store):
     cfg = active_config()
     verify_destination(store)
-    first = _apply(store, cfg, plan_answer(notify={"disposition": "notify_now", "urgency": "now", "importance": "high", "reason": "x"}))
+    send = {"title": "Enviar la respuesta a la agencia", "rationale": "", "action_class": "external", "operation": "gmail.reply", "when": "", "urgency": "normal",
+            "options": [{"id": "send", "label": "Enviar"}, {"id": "no", "label": "No"}]}
+    first = _apply(store, cfg, plan_answer(proposals=[send], notify={"disposition": "notify_now", "urgency": "now", "importance": "high", "reason": "x"}))
     assert dispatch(store, cfg, NOW)["notices"] == 1
     assert act.awaiting_owner(store, first.task_id)
     louder = [{"id": "pref-loud", "status": "active", "dimension": "notification", "effect": "notify", "scope": {}, "origin": "explicit", "exceptions": []}]
     plan = plan_answer(task_match={"decision": "advances", "task_id": first.task_id, "why": "same trip"},
-                       proposals=[{"title": "Comparar precios de hotel", "rationale": "", "action_class": "read", "operation": "web.read", "when": "", "urgency": "normal", "options": []}],
+                       proposals=[send, {"title": "Reservar el hotel más barato", "rationale": "", "action_class": "external", "operation": "booking.reserve", "when": "", "urgency": "normal",
+                                         "options": [{"id": "book", "label": "Reservar"}, {"id": "no", "label": "No"}]}],
                        notify={"disposition": "notify_now", "urgency": "today", "importance": "normal", "reason": "x"})
     again = _apply(store, cfg, plan, preferences=louder)
     assert again.attention_reason == "preference_notify" and again.task_id == first.task_id
-    newest = next(p for p in store.list_proposals(task_id=first.task_id) if p["title"].startswith("Comparar"))
+    newest = next(p for p in store.list_proposals(task_id=first.task_id) if p["title"].startswith("Reservar"))
     assert newest["batch_key"] == "digest" and newest["params"]["deliver_after"] == "2026-10-19T12:00:00Z"  # 14:00 local
     assert dispatch(store, cfg, NOW)["notices"] == 0
 

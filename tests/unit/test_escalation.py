@@ -50,7 +50,7 @@ def test_handle_investigates_silently_first_then_inform_tells_the_news_without_a
     assert outcome["disposition"] == "silent" and outcome["auto_jobs"] == 1  # nothing sent; the read step runs by itself
     task_id = outcome["task_id"]
     proposal = store.list_proposals(task_id=task_id)[0]
-    assert proposal["batch_key"] == "silent" and proposal["status"] == "executing"
+    assert proposal["batch_key"] == "auto" and proposal["status"] == "executing"  # the assistant's own work: never a button
     assert dispatch(store, cfg, NOW) == {"notices": 0, "digests": 0, "proposals": 0}
     # The investigation result comes back: the planner now informs (good news) and offers to close the invoice task.
     store.create_task(task_id="inv", kind="commitment", title="Factura 2026-031 pendiente de cobro", summary="", entities={}, expectations=[], checklist=[], now=NOW_S)

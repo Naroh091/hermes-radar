@@ -98,6 +98,11 @@ def _words(text: str) -> set[str]:
     return out
 
 
+def word_stems(text: str) -> set[str]:
+    """The significant word stems of a label or a step title (what :func:`canonical_item` compares)."""
+    return _words(text)
+
+
 def canonical_item(text: str, template: list[str]) -> str:
     """The template item ``text`` stands for, when the model reworded or translated it; otherwise ``text`` itself."""
     key = " ".join(str(text or "").lower().split())

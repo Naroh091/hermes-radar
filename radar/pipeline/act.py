@@ -10,11 +10,12 @@ from uuid import uuid4
 
 from ..delivery.cadence import next_delivery
 from ..i18n import t
-from ..trust import may_auto_run
+from ..trust import may_auto_run, needs_consent
 from .sessions import session_of, task_session_active
 from ..models import TASK_TERMINAL, canonical_hash
 from .attention import resolve
 from .checklists import merge_checklist, template_for
+from .reconcile import reconcile
 from .schemas import TASK_KINDS
 
 PROPOSAL_TTL_HOURS = 72
@@ -131,8 +132,12 @@ def declined_recently(store: Any, task_id: str, now_dt: datetime, hours: int = D
 
 
 def awaiting_owner(store: Any, task_id: str) -> bool:
-    """True while a notice about this task sits unanswered in the owner's chat (or sleeps until they asked)."""
-    return bool(store.list_proposals(statuses=("sent", "snoozed"), task_id=task_id, limit=1))
+    """True while a decision about this task sits unanswered in the owner's chat (or sleeps until they asked).
+    A piece of news that went out is not a question: it never holds the task."""
+    return any(
+        p.get("operation_id") != "inform" or (p.get("params") or {}).get("ask")
+        for p in store.list_proposals(statuses=("sent", "snoozed"), task_id=task_id, limit=20)
+    )
 
 
 def interrupt_again(store: Any, config: dict[str, Any], task_id: str, urgency: str, now_dt: datetime) -> bool:
@@ -405,7 +410,12 @@ def apply(
                 "options": [{"id": "ok", "label": t(language, "btn_ack")}], "ask": ask_only,
             })
         declined = declined_recently(store, task_id, now_dt)
+        superseded_ids: list[str] = []
+        if not created:
+            # A re-plan replaces the open steps: the same step is updated in place, the rest is withdrawn below.
+            candidates, superseded_ids = reconcile(store, task_id, candidates, now)
         suppressed = 0
+        updated = 0
         attempted = 0
         for item in candidates:
             if attempted >= 4:
@@ -420,24 +430,43 @@ def apply(
                 item_batch = "now"  # a step for a chosen moment is its own notice at that moment, never summary filler
             elif slot is not None and (when is None or when < slot):
                 when = slot  # grouped news waits for its summary slot
+            if item.get("operation") not in ("check", "inform", "ask") and not needs_consent(config, task, item):
+                item_batch = "auto"  # the assistant's own work: it runs by itself and is never offered as a button
             deliver_after = iso(when) if when and when > now_dt else ""
             ttl = timedelta(hours=SCHEDULED_TTL_HOURS) if deliver_after else timedelta(hours=PROPOSAL_TTL_HOURS)
             expires_at = iso((when if deliver_after else now_dt) + ttl)
             fingerprint = canonical_hash({"task": task_id, "title": " ".join(item["title"].lower().split())})
             options = item.get("options") or [{"id": "do", "label": t(language, "btn_do")}, {"id": "no", "label": t(language, "btn_no")}]
+            params = {"when": item.get("when", ""), "deliver_after": deliver_after, "rationale": item.get("rationale", ""),
+                      "message": plan.get("message", ""), "urgency": urgency, "importance": str(plan["notify"].get("importance") or "normal"),
+                      **({"owner_followup": True} if owner_followup else {}),
+                      **({"ask": True} if item.get("ask") else {}),
+                      **({"fact": item["fact"]} if isinstance(item.get("fact"), dict) and item["fact"].get("key") else {}),
+                      **({"draft": draft["text"], "draft_ref": draft.get("ref", "")} if draft else {})}
+            existing_id = item.get("existing_id")
+            if existing_id:
+                try:
+                    row = store.update_proposal(
+                        existing_id, now=now, title=item["title"], reason_text=item.get("rationale") or "", params=params, options=options,
+                        urgency=item.get("urgency", "normal"), expires_at=max(str(item.get("existing_expires_at") or ""), expires_at),
+                        fingerprint=fingerprint, batch_key=item_batch if item.get("existing_status") == "pending" else None,
+                    )
+                except (KeyError, ValueError, RuntimeError):
+                    suppressed += 1
+                    continue
+                updated += 1
+                if row.get("status") == "pending":
+                    proposal_ids.append(existing_id)
+                continue
             result = store.create_task_proposal(
                 proposal_id=str(uuid4()), task_id=task_id, title=item["title"], reason_text=item.get("rationale") or "",
-                action_class=item.get("action_class", "read"), operation_id=item.get("operation") or None,
-                params={"when": item.get("when", ""), "deliver_after": deliver_after, "rationale": item.get("rationale", ""),
-                        "message": plan.get("message", ""), "urgency": urgency, "importance": str(plan["notify"].get("importance") or "normal"),
-                        **({"owner_followup": True} if owner_followup else {}),
-                        **({"ask": True} if item.get("ask") else {}),
-                        **({"draft": draft["text"], "draft_ref": draft.get("ref", "")} if draft else {})},
+                action_class=item.get("action_class", "read"), operation_id=item.get("operation") or None, params=params,
                 options=options, urgency=item.get("urgency", "normal"), expires_at=expires_at, fingerprint=fingerprint,
                 now=now, batch_key=item_batch,
             )
             if result.get("created"):
                 proposal_ids.append(result["id"])
+        withdrawn = store.supersede_proposals(superseded_ids, now=now, by="replan") if superseded_ids else 0
         review_at = parse_iso(planned.get("next_review_at"))
         if review_at and review_at > now_dt:
             store.upsert_followup(
@@ -447,13 +476,13 @@ def apply(
                 timezone=config.get("owner", {}).get("timezone", "UTC"),
             )
     else:
-        suppressed = 0
+        suppressed = updated = withdrawn = 0
         store.cancel_task_followups(task_id, now)
     store.add_audit(
         audit_id=str(uuid4()), event_type="pipeline", subject_type="task", subject_id=task_id,
         correlation_id=signals[0]["id"] if signals else None, actor_kind="scheduler", decision_code=decision,
         metadata={"disposition": disposition, "attention": attention.reason, "urgency": urgency, "proposals": len(proposal_ids),
-                  "suppressed": suppressed, "status": task.get("status"), "created": created}, now=now,
+                  "suppressed": suppressed, "updated": updated, "superseded": withdrawn, "status": task.get("status"), "created": created}, now=now,
     )
     return ActResult(
         task_id=task_id, task_status=task.get("status"), decision=decision, disposition=disposition,

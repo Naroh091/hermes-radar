@@ -9,7 +9,7 @@ from typing import Any
 from ..jobs.service import DEFER_REASONS, expire_proposal, job_block_reason, start_or_wait
 from ..llm import BudgetExhausted, LlmError
 from ..models import TASK_TERMINAL
-from ..trust import may_auto_run
+from ..trust import needs_consent
 from .recall import build_query, recall_summary
 from .conversation import is_conversation, transcript, view as conversation_view
 from .sessions import quiet_minutes, session_active, session_of, task_session_active
@@ -269,15 +269,23 @@ async def recall_context(rt: Any, extract: dict[str, Any] | None, signals: list[
 
 
 def task_context(store: Any, task: dict[str, Any]) -> dict[str, Any]:
-    """The task plus what was already proposed and what the owner refused, for the planner."""
+    """The task plus what was already proposed (newest first), what is still open or running, what the owner
+    refused and what they let expire unanswered, for the planner."""
     task = dict(task)
-    history = store.list_proposals(task_id=task["id"], limit=50)
-    task["recent_proposals"] = [{"title": p.get("title"), "status": p.get("status")} for p in history[-8:]]
+    history = store.list_proposals(task_id=task["id"], limit=50, newest=True)
+    task["recent_proposals"] = [
+        {"title": p.get("title"), "status": p.get("status"), "operation": p.get("operation_id") or ""} for p in history[:8]
+    ]
+    task["open_steps"] = correlate.open_steps(store, task["id"])
     task["declined_by_owner"] = [
         p.get("title") for p in history
         if p.get("status") == "declined" and not (p.get("response") or {}).get("auto") and not (p.get("response") or {}).get("task_action")
         and not (p.get("response") or {}).get("ack")
-    ][-10:]
+    ][:10]
+    task["unanswered_by_owner"] = [
+        p.get("title") for p in history
+        if p.get("status") == "expired" and (p.get("params") or {}).get("expired_reason") == "unanswered"
+    ][:5]
     return task
 
 
@@ -304,14 +312,11 @@ def _auto_run(rt: Any, result: Any, now_dt: datetime) -> int:
 
 
 def _auto_eligible(rt: Any, proposal: dict[str, Any], task: dict[str, Any]) -> bool:
-    if proposal.get("operation_id") in ("check", "inform"):
+    if proposal.get("operation_id") in ("check", "inform", "ask"):
         return False
-    if (task.get("entities") or {}).get("session_id") and not (rt.config.get("observation") or {}).get("session_auto_jobs", False):
-        return False  # work that began in a chat stays with the chat: Radar offers, the owner decides
     if task_session_active(rt.store, task, rt.clock(), rt.config):
         return False  # the chat session is on it; no parallel work
-    trust = rt.config.get("trust") or {}
-    return may_auto_run(trust, proposal.get("action_class", "read"), kind=task.get("kind"), operation_id=proposal.get("operation_id"))
+    return not needs_consent(rt.config, task, proposal)  # the assistant's own work, unless the trust level or a chat origin reserves it
 
 
 def _start_auto(rt: Any, proposal: dict[str, Any], task: dict[str, Any], now_dt: datetime) -> bool:
@@ -356,15 +361,20 @@ def _hand_back(store: Any, proposal: dict[str, Any], now: str) -> None:
 
 
 def retry_pending_jobs(rt: Any, now_dt: datetime) -> int:
-    """Each tick: start waiting steps whose block cleared, park accepted steps that never got a job,
-    and run the scheduled steps whose moment has come when trust allows (the rest reach the owner as a notice)."""
+    """Each tick: start waiting steps whose block cleared, park accepted steps that never got a job, run the
+    assistant's own queued work (``batch_key`` auto) once nothing blocks it, and run the scheduled steps whose
+    moment has come when trust allows (the rest reach the owner as a notice)."""
     store, config = rt.store, rt.config
     now = iso(now_dt)
     started = 0
     for proposal in store.list_proposals(statuses=("pending",), limit=200):
-        due = act.parse_iso((proposal.get("params") or {}).get("when"))
-        if due is None or due > now_dt or proposal.get("operation_id") in ("check", "inform"):
+        if proposal.get("operation_id") in ("check", "inform", "ask"):
             continue
+        due = act.parse_iso((proposal.get("params") or {}).get("when"))
+        if due is not None and due > now_dt:
+            continue
+        if due is None and proposal.get("batch_key") != "auto":
+            continue  # a decision waits for the owner, not for the clock
         try:
             task = store.get_task(str(proposal.get("task_id") or ""))
         except KeyError:

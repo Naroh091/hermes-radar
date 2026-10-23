@@ -110,7 +110,9 @@ def test_a_worker_process_is_not_the_owner_talking(store, monkeypatch):
 def test_an_unanswered_notice_holds_even_urgent_news_until_the_cooldown_passes(store):
     cfg = active_config()
     verify_destination(store)
-    first = _apply(store, cfg, plan_answer(notify={"disposition": "notify_now", "urgency": "now", "importance": "high", "reason": "x"}))
+    ask = {"title": "¿Confirmo la reserva?", "rationale": "", "action_class": "read", "operation": "ask", "when": "", "urgency": "high",
+           "options": [{"id": "si", "label": "Sí"}, {"id": "no", "label": "No"}]}
+    first = _apply(store, cfg, plan_answer(proposals=[ask], notify={"disposition": "notify_now", "urgency": "now", "importance": "high", "reason": "x"}))
     from radar.delivery.dispatch import dispatch
 
     assert dispatch(store, cfg, NOW)["notices"] == 1

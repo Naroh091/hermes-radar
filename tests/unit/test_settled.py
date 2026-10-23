@@ -181,7 +181,7 @@ def test_summary_slots_no_longer_hold_back_automatic_steps(store, tmp_path):
                        checks=[], notify={"disposition": "digest", "urgency": "this_week", "importance": "normal", "reason": "x"})
     result = _apply(store, cfg, plan, extract=extract_answer(category="work_item"))
     [draft] = store.list_proposals(task_id=result.task_id)
-    assert draft["batch_key"] == "digest" and draft["params"]["deliver_after"] == "2026-10-20T07:00:00Z"
+    assert draft["batch_key"] == "auto" and draft["params"]["deliver_after"] == "2026-10-20T07:00:00Z"  # queued work, never a button
     rt = _runtime(store, cfg, tmp_path)
     assert _start_auto(rt, draft, store.get_task(result.task_id), NOW) is True  # the slot delays the news, not the work
     assert store.get_proposal(draft["id"])["status"] in ("accepted", "waiting", "executing") and store.list_jobs(task_id=result.task_id, limit=5)

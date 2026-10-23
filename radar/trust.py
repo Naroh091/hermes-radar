@@ -18,6 +18,27 @@ NEVER_AUTO = frozenset({"payments.charge", "booking.reserve", "deploy.run", "git
 ASK_FIRST = frozenset({"cron.create", "task.update"})  # reversible, but automations and closing the owner's tasks are always their call
 
 
+def needs_consent(config: dict[str, Any], task: dict[str, Any] | None, proposal: dict[str, Any]) -> bool:
+    """True when a step is the owner's decision (a question, a consistency check, an irreversible action, work the
+    trust level reserves for them); False when it is the assistant's own work, which runs by itself and is never
+    offered as a button. Accepts a planned item (``operation``, ``ask``) or a stored proposal (``operation_id``, ``params``)."""
+    operation = str(proposal.get("operation_id") or proposal.get("operation") or "")
+    action_class = str(proposal.get("action_class") or "read")
+    params = proposal.get("params") if isinstance(proposal.get("params"), dict) else {}
+    if operation in ("ask", "check"):
+        return True
+    if operation == "inform":
+        return bool(params.get("ask") or proposal.get("ask"))
+    kind = (task or {}).get("kind")
+    trust = config.get("trust") or {}
+    if action_class == "external":
+        return not may_auto_run(trust, "external", kind=kind, operation_id=operation or None)
+    entities = (task or {}).get("entities") if isinstance((task or {}).get("entities"), dict) else {}
+    if entities.get("session_id") and not (config.get("observation") or {}).get("session_auto_jobs", False):
+        return True  # work that began in a chat stays with the chat: Radar offers, the owner decides
+    return not may_auto_run(trust, action_class, kind=kind, operation_id=operation or None)
+
+
 def describe(level: str) -> dict[str, Any]:
     classes = sorted(_AUTO_BY_LEVEL.get(level, _AUTO_BY_LEVEL["balanced"]))
     return {"level": level, "auto_classes": classes, "asks_for": "external"}

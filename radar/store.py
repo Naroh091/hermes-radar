@@ -1223,14 +1223,19 @@ class Store:
                 ).fetchone()
                 if existing is not None:
                     return {**dict(existing), "created": False}
-                terminal = db.execute(
-                    """SELECT id, status FROM proposals WHERE profile_key=? AND owner_id=? AND fingerprint=?
+                for terminal in db.execute(
+                    """SELECT id, status, response_json FROM proposals WHERE profile_key=? AND owner_id=? AND fingerprint=?
                        AND status IN ('declined','cancelled')
-                       ORDER BY updated_at DESC LIMIT 1""",
+                       ORDER BY updated_at DESC LIMIT 5""",
                     (*self._scope_values, fingerprint),
-                ).fetchone()
-                if terminal is not None:
-                    return {**dict(terminal), "created": False, "suppressed": True}
+                ).fetchall():
+                    try:
+                        response = json.loads(terminal["response_json"] or "{}")
+                    except (json.JSONDecodeError, TypeError):
+                        response = {}
+                    if isinstance(response, dict) and (response.get("ack") or response.get("auto")):
+                        continue  # acknowledged news or an automatic withdrawal is not the owner's refusal
+                    return {"id": terminal["id"], "status": terminal["status"], "created": False, "suppressed": True}
             db.execute(
                 """INSERT INTO proposals
                 (id, profile_key, owner_id, created_at, updated_at, revision, followup_id, plan_id,
@@ -1255,8 +1260,9 @@ class Store:
 
     def list_proposals(
         self, statuses: tuple[str, ...] | None = None, limit: int = 50, task_id: str | None = None,
-        outbox_id: str | None = None,
+        outbox_id: str | None = None, newest: bool = False,
     ) -> list[dict[str, Any]]:
+        """Oldest first by default; ``newest=True`` returns the most recent rows first (the last N, not the first N)."""
         clauses = ["profile_key=?", "owner_id=?"]
         params: list[Any] = list(self._scope_values)
         if statuses:
@@ -1269,8 +1275,9 @@ class Store:
             clauses.append("outbox_id=?")
             params.append(outbox_id)
         params.append(max(1, min(int(limit), 200)))
+        order = "created_at DESC, id DESC" if newest else "created_at, id"
         rows = self.db.execute(
-            f"SELECT * FROM proposals WHERE {' AND '.join(clauses)} ORDER BY created_at, id LIMIT ?", params
+            f"SELECT * FROM proposals WHERE {' AND '.join(clauses)} ORDER BY {order} LIMIT ?", params
         ).fetchall()
         return [self._decode(row) or {} for row in rows]
 
@@ -1352,6 +1359,79 @@ class Store:
                 (canonical_json(params), now, *self._scope_values, proposal_id),
             )
         return self.get_proposal(proposal_id)
+
+    def update_proposal(
+        self, proposal_id: str, *, now: str, title: str | None = None, reason_text: str | None = None,
+        params: dict[str, Any] | None = None, options: list[dict[str, Any]] | None = None, urgency: str | None = None,
+        expires_at: str | None = None, fingerprint: str | None = None, batch_key: str | None = None,
+    ) -> dict[str, Any]:
+        """Rewrite an open proposal in place (a re-plan restating the same step): the row, its id and the number the
+        owner saw stay; ``params`` replaces the whole object. The fingerprint only changes when no other live row
+        holds the new one."""
+        if urgency is not None and urgency not in {"low", "normal", "high"}:
+            raise ValueError("invalid urgency")
+        with self.transaction() as db:
+            row = db.execute(
+                "SELECT status, fingerprint FROM proposals WHERE profile_key=? AND owner_id=? AND id=?",
+                (*self._scope_values, proposal_id),
+            ).fetchone()
+            if row is None:
+                raise KeyError(proposal_id)
+            if row["status"] not in ("pending", "sent", "snoozed"):
+                raise ValueError(f"proposal {proposal_id} is not open")
+            sets: list[str] = ["updated_at=?", "revision=revision+1"]
+            values: list[Any] = [now]
+            for column, value in (("title", title), ("reason_text", reason_text), ("urgency", urgency), ("expires_at", expires_at), ("batch_key", batch_key)):
+                if value is not None:
+                    sets.append(f"{column}=?")
+                    values.append(value)
+            if params is not None:
+                sets.append("params_json=?")
+                values.append(canonical_json(self._object(params, "params")))
+            if options is not None:
+                sets.append("options_json=?")
+                values.append(canonical_json(self._array(options, "options")))
+            if fingerprint and fingerprint != row["fingerprint"]:
+                clash = db.execute(
+                    """SELECT id FROM proposals WHERE profile_key=? AND owner_id=? AND fingerprint=? AND id<>?
+                       AND status IN ('draft','pending','sent','snoozed','waiting','accepted','executing')""",
+                    (*self._scope_values, fingerprint, proposal_id),
+                ).fetchone()
+                if clash is None:
+                    sets.append("fingerprint=?")
+                    values.append(fingerprint)
+            db.execute(
+                f"UPDATE proposals SET {', '.join(sets)} WHERE profile_key=? AND owner_id=? AND id=?",
+                (*values, *self._scope_values, proposal_id),
+            )
+        return self.get_proposal(proposal_id)
+
+    def supersede_proposals(self, proposal_ids: list[str], *, now: str, by: str = "replan") -> int:
+        """Withdraw open proposals a newer plan no longer restates: ``expired`` with ``params.superseded_by``.
+        In-flight and settled rows are left alone. Returns how many were withdrawn."""
+        count = 0
+        with self.transaction() as db:
+            for proposal_id in proposal_ids:
+                row = db.execute(
+                    "SELECT status, params_json FROM proposals WHERE profile_key=? AND owner_id=? AND id=?",
+                    (*self._scope_values, proposal_id),
+                ).fetchone()
+                if row is None or row["status"] not in ("pending", "sent", "snoozed"):
+                    continue
+                try:
+                    params = json.loads(row["params_json"] or "{}")
+                except json.JSONDecodeError:
+                    params = {}
+                if not isinstance(params, dict):
+                    params = {}
+                params.update({"superseded_by": by or "replan", "superseded_at": now})
+                db.execute(
+                    """UPDATE proposals SET status='expired', params_json=?, updated_at=?, revision=revision+1
+                       WHERE profile_key=? AND owner_id=? AND id=?""",
+                    (canonical_json(params), now, *self._scope_values, proposal_id),
+                )
+                count += 1
+        return count
 
     def expire_proposals(self, now: str) -> int:
         with self.transaction() as db:

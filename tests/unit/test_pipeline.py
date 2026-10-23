@@ -66,7 +66,7 @@ def test_apply_creates_task_proposals_facts_and_review_timer(store):
     assert [c["status"] for c in task["checklist"][:2]] == ["done", "missing"]
     assert store.list_facts()[0]["key"] == "shoe size"
     proposals = store.list_proposals(task_id=task["id"])
-    assert len(proposals) == 2 and {p["batch_key"] for p in proposals} == {"now"}
+    assert len(proposals) == 2 and {p["batch_key"] for p in proposals} == {"auto"}  # the assistant's own work: it runs by itself
     scheduled = next(p for p in proposals if p["title"].startswith("Hacer check-in"))
     assert scheduled["params"]["deliver_after"] == "2026-11-02T06:00:00Z"
     followup = store.get_followup(f"task:{task['id']}:review")

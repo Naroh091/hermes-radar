@@ -34,19 +34,24 @@ def _apply(store, cfg, plan):
 
 def test_only_what_cannot_wait_interrupts_and_the_rest_waits_for_its_slot(store):
     cfg = config()
-    weekly = _apply(store, cfg, plan_answer(notify={"disposition": "notify_now", "urgency": "this_week", "importance": "normal", "reason": "x"}))
+    # A decision (the owner's) and a scheduled piece of work (the assistant's own).
+    hotel_ask = {"title": "Buscar hotel en Lisboa 3-5 nov", "rationale": "No hay reserva", "action_class": "read", "operation": "ask", "when": "", "urgency": "normal",
+                 "options": [{"id": "si", "label": "Sí, busca"}, {"id": "no", "label": "No"}]}
+    steps = [hotel_ask, plan_answer()["proposals"][1]]
+    weekly = _apply(store, cfg, plan_answer(proposals=steps, notify={"disposition": "notify_now", "urgency": "this_week", "importance": "normal", "reason": "x"}))
     assert weekly.disposition == "digest"
     proposals = store.list_proposals(task_id=weekly.task_id)
     hotel = next(p for p in proposals if p["title"].startswith("Buscar hotel"))
     checkin = next(p for p in proposals if p["title"].startswith("Hacer check-in"))
     assert hotel["batch_key"] == "digest" and hotel["params"]["deliver_after"] == "2026-10-20T07:00:00Z" and hotel["params"]["urgency"] == "this_week"
-    assert checkin["batch_key"] == "now" and checkin["params"]["deliver_after"] == "2026-11-02T06:00:00Z"  # its own moment, as its own notice
-    urgent = _apply(store, cfg, plan_answer(task={**plan_answer()["task"], "title": "Vuelo mañana sin hotel"},
+    assert checkin["batch_key"] == "auto" and checkin["params"]["deliver_after"] == "2026-11-02T06:00:00Z"  # its own moment, run by itself when it comes
+    urgent = _apply(store, cfg, plan_answer(task={**plan_answer()["task"], "title": "Vuelo mañana sin hotel"}, proposals=steps,
                                             notify={"disposition": "notify_now", "urgency": "now", "importance": "high", "reason": "x"}))
     assert urgent.disposition == "notify_now"
     now_items = store.list_proposals(task_id=urgent.task_id)
-    assert {p["batch_key"] for p in now_items} == {"now"} and next(p for p in now_items if p["title"].startswith("Buscar"))["params"]["deliver_after"] == ""
-    today = _apply(store, cfg, plan_answer(task={**plan_answer()["task"], "title": "Vuelo en dos días"},
+    asked = next(p for p in now_items if p["title"].startswith("Buscar"))
+    assert asked["batch_key"] == "now" and asked["params"]["deliver_after"] == ""
+    today = _apply(store, cfg, plan_answer(task={**plan_answer()["task"], "title": "Vuelo en dos días"}, proposals=steps,
                                            notify={"disposition": "digest", "urgency": "today", "importance": "normal", "reason": "x"}))
     assert next(p for p in store.list_proposals(task_id=today.task_id) if p["title"].startswith("Buscar"))["params"]["deliver_after"] == "2026-10-19T12:00:00Z"
     # A plan written before urgency existed still validates: notify_now means now, digest means today.

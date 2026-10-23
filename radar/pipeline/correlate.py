@@ -40,6 +40,29 @@ def compact_task(task: dict[str, Any]) -> dict[str, Any]:
 
 
 OPEN_STATUSES = ("open", "waiting", "needs_user", "in_progress", "snoozed")
+OPEN_STEP_STATUSES = ("pending", "sent", "snoozed", "waiting", "accepted", "executing")
+
+
+def open_steps(store: Any, task_id: str, limit: int = 10) -> list[dict[str, Any]]:
+    """The task's steps still open (waiting for the owner) or running, newest first: what a re-plan must restate
+    or withdraw, and what it must never duplicate."""
+    if not hasattr(store, "list_proposals"):
+        return []
+    try:
+        rows = store.list_proposals(task_id=task_id, limit=50, newest=True)
+    except TypeError:  # a store without ``newest``
+        rows = list(reversed(store.list_proposals(task_id=task_id, limit=50)))
+    out: list[dict[str, Any]] = []
+    for proposal in rows:
+        if proposal.get("status") not in OPEN_STEP_STATUSES:
+            continue
+        out.append({
+            "id": proposal.get("id"), "title": proposal.get("title"), "operation": proposal.get("operation_id") or "",
+            "action_class": proposal.get("action_class") or "read", "status": proposal.get("status"),
+        })
+        if len(out) >= limit:
+            break
+    return out
 
 
 def candidate_tasks(store: Any, extract: dict[str, Any], *, limit: int = 6, session_id: str = "", group_key: str = "") -> list[dict[str, Any]]:
@@ -66,4 +89,7 @@ def candidate_tasks(store: Any, extract: dict[str, Any], *, limit: int = 6, sess
     if category and category != "noise" and not session_id:
         for task in store.list_tasks(statuses=OPEN_STATUSES, limit=4, kinds=(category,)):
             found.setdefault(task["id"], task)
-    return [compact_task(task) for task in list(found.values())[:limit]]
+    candidates = [compact_task(task) for task in list(found.values())[:limit]]
+    for candidate in candidates:
+        candidate["open_steps"] = open_steps(store, str(candidate.get("id") or ""), limit=6)
+    return candidates
