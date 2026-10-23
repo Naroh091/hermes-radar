@@ -1131,6 +1131,17 @@ class Store:
                     claimed.append(item)
         return claimed
 
+    def cancel_outbox(self, outbox_id: str, *, fencing_token: int, error: str, now: str) -> None:
+        """A claimed message that must never go out (its decisions were withdrawn before delivery)."""
+        with self.transaction() as db:
+            cursor = db.execute(
+                """UPDATE outbox SET status='cancelled', last_error=?, lease_until=NULL, updated_at=?, revision=revision+1
+                   WHERE profile_key=? AND owner_id=? AND id=? AND status='sending' AND fencing_token=?""",
+                (error, now, *self._scope_values, outbox_id, fencing_token),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError("stale outbox fencing token")
+
     def finish_outbox(
         self, outbox_id: str, *, fencing_token: int, success: bool,
         platform_message_id: str | None, error: str | None, next_attempt_at: str, now: str,

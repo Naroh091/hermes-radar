@@ -18,6 +18,9 @@ log = logging.getLogger(__name__)
 
 SUPPORTED_SOURCE_KINDS = ("http_status", "gmail", "calendar", "github")
 WATCH_RENEWAL_HOURS = 24
+HOLD_MINUTES = 10  # a message about a thread that just moved waits for the re-plan
+FRESH_INTERVAL = timedelta(minutes=3)  # how often one task's thread is re-read before a message
+OPEN_FOR_DELIVERY = ("pending", "sent", "snoozed", "waiting", "accepted", "executing")
 
 
 def utc_now() -> datetime:
@@ -135,6 +138,7 @@ class Scheduler:
         self.runtime = runtime
         self._semaphore = asyncio.Semaphore(config["scheduler"]["max_concurrent_checks"])
         self._sync_locks: dict[str, asyncio.Lock] = {}
+        self._fresh_at: dict[str, datetime] = {}  # task id -> when its mail thread was last re-read before a message
 
     async def tick(self) -> dict[str, Any]:
         if self.runtime is None:
@@ -483,6 +487,40 @@ class Scheduler:
             return False  # no quiet window configured
         return start <= minute < end if start < end else minute >= start or minute < end
 
+    def _proposal_open(self, proposal_id: str) -> bool:
+        try:
+            return self.store.get_proposal(proposal_id).get("status") in OPEN_FOR_DELIVERY
+        except KeyError:
+            return False
+
+    async def _thread_moved(self, task_id: str, now_dt: datetime) -> bool:
+        """True when the mail thread behind ``task_id`` has messages Radar has not judged yet (the owner's own
+        reply among them): the account is re-synced first, at most every ``FRESH_INTERVAL`` per task."""
+        if self.runtime is None:
+            return False
+        try:
+            signals = self.store.signals_for_task(task_id, limit=20)
+        except Exception:
+            return False
+        thread = next((s for s in signals if s.get("kind") == "email" and str(s.get("group_key") or "").startswith("thread:")), None)
+        if thread is None:
+            return False
+        source_id, group_key = str(thread.get("source_id") or ""), str(thread.get("group_key") or "")
+        adapter = (getattr(self.runtime, "sources", None) or {}).get(source_id)
+        last = self._fresh_at.get(task_id)
+        if adapter is not None and getattr(adapter, "kind", "") == "gmail" and (last is None or now_dt - last >= FRESH_INTERVAL):
+            self._fresh_at[task_id] = now_dt
+            lock = self._sync_locks.setdefault(source_id, asyncio.Lock())
+            async with lock:
+                try:
+                    await self.runtime.sync_source(adapter, now_dt)
+                except Exception as exc:  # a lookup that fails is just a lookup not made
+                    log.info("radar thread re-read failed for %s: %s", source_id, exc)
+        try:
+            return bool(self.store.list_signals(group_key=group_key, status="pending", limit=3))
+        except Exception:
+            return False
+
     async def _deliver_outbox(self, now_dt: datetime) -> int:
         if self.config["mode"] != "active" or not self.config["notifications"]["enabled"]:
             return 0
@@ -498,6 +536,18 @@ class Scheduler:
                     error="quiet_hours", next_attempt_at=iso(now_dt + timedelta(minutes=15)), now=iso(self.clock()),
                 )
                 continue
+            if row.get("task_id") and row.get("kind") in ("notice", "digest"):
+                # Before interrupting about a mail thread, re-read it: what the owner already answered is not asked.
+                if await self._thread_moved(str(row["task_id"]), now_dt):
+                    self.store.finish_outbox(
+                        row["id"], fencing_token=row["fencing_token"], success=False, platform_message_id=None,
+                        error="thread_moved", next_attempt_at=iso(now_dt + timedelta(minutes=HOLD_MINUTES)), now=iso(self.clock()),
+                    )
+                    continue
+                ids = [pid for pid in payload.get("proposal_ids") or [] if isinstance(pid, str)]
+                if ids and not any(self._proposal_open(pid) for pid in ids):
+                    self.store.cancel_outbox(row["id"], fencing_token=row["fencing_token"], error="superseded", now=iso(self.clock()))
+                    continue
             try:
                 destination = self.store.destination(row["destination_id"])
                 receipt = await self.transports.send(row["platform"], destination, payload)

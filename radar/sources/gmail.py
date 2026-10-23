@@ -6,7 +6,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
-from ..pipeline.triage import triage_signal
+from ..pipeline.correlate import OPEN_STATUSES
+from ..pipeline.triage import TriageDecision, triage_signal
 from ..providers.base import MailMessage, MailProvider, ProviderError
 from ..providers.mcp_parsing import automation_signals
 from .base import SourceAdapter, SyncResult, fingerprint, iso
@@ -15,6 +16,12 @@ log = logging.getLogger(__name__)
 
 RAW_HOLD_HOURS = 48
 CURSOR_OVERLAP_SECONDS = 180
+INBOX_AND_SENT = "{in:inbox in:sent}"  # Gmail's OR group
+
+
+def address_of(sender: Any) -> str:
+    text = str(sender or "").strip().lower()
+    return text[text.rfind("<") + 1:].rstrip(">").strip() if "<" in text else text
 
 
 class GmailSource(SourceAdapter):
@@ -30,8 +37,10 @@ class GmailSource(SourceAdapter):
         return str(self.settings.get("address") or self.row.get("account_ref") or "")
 
     def _query(self, now_dt: datetime) -> str:
+        """Inbox and sent mail: what the owner wrote in a tracked thread is the surest sign that it moved on
+        (on 2026-10-23 Radar asked about a thread the owner had answered one minute earlier)."""
         labels = [str(l) for l in (self.settings.get("labels") or ["INBOX"])]
-        scope = " ".join(f"label:{label}" if label.upper() != "INBOX" else "in:inbox" for label in labels) or "in:inbox"
+        scope = " ".join(f"label:{label}" if label.upper() != "INBOX" else INBOX_AND_SENT for label in labels) or INBOX_AND_SENT
         after = self.cursor.get("after_epoch")
         if isinstance(after, (int, float)) and after > 0:
             return f"{scope} after:{int(after) - CURSOR_OVERLAP_SECONDS}"
@@ -48,6 +57,8 @@ class GmailSource(SourceAdapter):
             "source_kind": "gmail", "thread_reply": subject.lower().startswith(("re:", "fwd:", "rv:")),
             "server": self.settings.get("server", ""),
         }
+        if self.owner_sent(message):
+            meta["owner_sent"] = True
         snippet_chars = int(self.config.get("retention", {}).get("snippet_chars", 500))
         body = message.body if with_body else ""
         return {
@@ -60,12 +71,27 @@ class GmailSource(SourceAdapter):
             "content_ref": f"gmail:{self.address}:{message.id}",
         }
 
+    def owner_sent(self, message: MailMessage) -> bool:
+        return bool(self.address) and address_of(message.sender) == self.address.strip().lower()
+
+    def _tracked(self, group_key: str) -> bool:
+        """True when an open task already follows this thread."""
+        if not hasattr(self.store, "tasks_for_group"):
+            return False
+        try:
+            return bool(self.store.tasks_for_group(group_key, statuses=OPEN_STATUSES, limit=1))
+        except Exception:
+            return False
+
     def ingest_message(self, message: MailMessage, now_dt: datetime, *, read_body: bool = True) -> str:
         """Returns ``added`` | ``ignored`` | ``duplicate``."""
         if self.store.signal_exists(self.id, message.id):
             return "duplicate"
         head = self._signal_from(message, now_dt, with_body=False)
-        decision = triage_signal(head, self.preferences, self.config)
+        if head["meta"].get("owner_sent") and not self._tracked(head["group_key"]):
+            decision = TriageDecision(False, "owner_sent_untracked")  # the owner's own mail matters only where a task is waiting
+        else:
+            decision = triage_signal(head, self.preferences, self.config)
         now = iso(now_dt)
         if not decision.keep:
             self.store.add_signal(
