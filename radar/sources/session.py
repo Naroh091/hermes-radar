@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime, timedelta
 from typing import Any
 from uuid import uuid4
@@ -15,6 +16,14 @@ SOURCE_ID = "local:session-hooks"
 MAX_USER = 4000
 MAX_ASSISTANT = 2000
 EXCLUDED_PLATFORMS = {"cron", "webhook", "subagent", "api_server", "kanban", "msgraph_webhook"}
+# Processes that are agents working for the owner, not the owner talking: the kanban dispatcher's workers
+# (``HERMES_KANBAN_TASK``) report platform "cli", and radar's own delegated jobs carry ``HERMES_RADAR_JOB``.
+AUTOMATED_PROCESS_ENV = ("HERMES_KANBAN_TASK", "HERMES_RADAR_JOB")
+
+
+def automated_process(environ: dict[str, str] | None = None) -> bool:
+    env = os.environ if environ is None else environ
+    return any(env.get(name) for name in AUTOMATED_PROCESS_ENV)
 
 
 def _text(value: Any) -> str:
@@ -36,7 +45,7 @@ def _text(value: Any) -> str:
 def record_turn(store: Any, config: dict[str, Any], event: dict[str, Any], now_dt: datetime) -> bool:
     """Persist one finished turn as a debounced ``session_turn`` signal."""
     platform = str(event.get("platform") or "")
-    if platform in EXCLUDED_PLATFORMS:
+    if platform in EXCLUDED_PLATFORMS or automated_process():
         return False
     user_text = redact(_text(event.get("user_message")).strip())
     assistant_text = redact(_text(event.get("assistant_response")).strip())

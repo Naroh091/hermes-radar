@@ -6,7 +6,7 @@ from typing import Any
 from uuid import uuid4
 
 from ..i18n import t
-from ..models import TASK_TERMINAL
+from ..models import TASK_TERMINAL, canonical_hash
 from .cadence import next_delivery
 from .context import thread_context
 
@@ -121,6 +121,10 @@ def respond_to_proposal(
     option = (option or "").strip().lower()
     is_check = proposal.get("operation_id") == "check"
     is_info = proposal.get("operation_id") == "inform"
+    if proposal.get("operation_id") == "ask" and proposal.get("status") in CANCELLABLE:
+        answered = _answer_ask(store, proposal, option=option, actor=actor, channel=channel, note=note, now_dt=now_dt, language=language)
+        if answered is not None:
+            return answered
     intent = ("decline" if option == "ok" else "accept" if option == "wrong" else option_intent(proposal, option)) if is_check else option_intent(proposal, option)
     if is_info and proposal.get("status") in CANCELLABLE:
         store.respond_proposal(proposal_id, decision="declined", response={**{"option": option, "actor": actor, "channel": channel, "note": note[:500]}, "ack": True}, now=now)
@@ -184,6 +188,49 @@ def respond_to_proposal(
     return {"outcome": outcome, "text": text, "proposal": store.get_proposal(proposal_id)}
 
 
+def _answer_ask(store: Any, proposal: dict[str, Any], *, option: str, actor: str, channel: str, note: str,
+                now_dt: datetime, language: str) -> dict[str, Any] | None:
+    """The owner answered a question: the answer becomes a fact of theirs and a signal bound to the task, so the
+    plan starts again from what they said. None when the option is not one of the question's answers."""
+    options = [o for o in proposal.get("options") or [] if isinstance(o, dict) and o.get("id")]
+    ids = [str(o["id"]).strip().lower() for o in options]
+    if option not in ids:
+        return None
+    now = iso(now_dt)
+    index = ids.index(option)
+    label = str(options[index].get("label") or option)
+    fact = (proposal.get("params") or {}).get("fact") or {}
+    value = str(fact.get("yes" if index == 0 else "no") or label)
+    key = str(fact.get("key") or "")
+    if key:
+        try:
+            store.record_owner_fact(key=key, value=value, provenance={"proposal_id": proposal["id"], "at": now, "channel": channel}, now=now)
+        except ValueError:
+            key = ""
+    store.respond_proposal(proposal["id"], decision="accepted", response={"option": option, "actor": actor, "channel": channel, "note": note[:500], "answer": label}, now=now)
+    task_id = proposal.get("task_id")
+    if task_id:
+        try:
+            source_id = store.ensure_owner_source(now)
+            question = str(proposal.get("title") or "")
+            store.add_signal(
+                signal_id=str(uuid4()), source_id=source_id, kind="user_reply", occurred_at=now,
+                external_ref=f"answer:{proposal['id']}", group_key=f"task:{task_id}", title=f"{question} → {label}",
+                snippet=f"{question} {label}." + (f" {key} = {value}." if key else "") + (f" {note[:300]}" if note else ""),
+                meta={"task_id": task_id, "proposal_id": proposal["id"], "question": question, "answer": label,
+                      "fact": {"key": key, "value": value} if key else {}, "source_kind": "owner", "platform": channel},
+                fingerprint=f"answer:{proposal['id']}", now=now,
+            )
+        except Exception:
+            pass
+    store.add_audit(
+        audit_id=str(uuid4()), event_type="owner_response", subject_type="proposal", subject_id=proposal["id"],
+        correlation_id=task_id, actor_kind="verified_owner", decision_code="answered",
+        metadata={"option": option, "channel": channel, "fact": key}, now=now,
+    )
+    return {"outcome": "answered", "text": t(language, "ask_recorded", value=value), "proposal": store.get_proposal(proposal["id"])}
+
+
 def _close_check_task(store: Any, task_id: str, now: str) -> None:
     try:
         task = store.get_task(task_id)
@@ -192,6 +239,33 @@ def _close_check_task(store: Any, task_id: str, now: str) -> None:
             store.cancel_task_followups(task_id, now)
     except (KeyError, ValueError, RuntimeError):
         pass
+
+
+def learn_from_mute(store: Any, task: dict[str, Any], now: str) -> dict[str, Any] | None:
+    """«No avises más» teaches something: the next mail of the same family (same sender, same subject stem) is
+    silenced at triage instead of becoming a task again. Only mails qualify; a chat has no family."""
+    from ..preferences import new_preference, subject_stem
+
+    try:
+        origin = store.get_signal(task.get("origin_signal_id") or "")
+    except (KeyError, TypeError):
+        return None
+    meta = origin.get("meta") or {}
+    sender = str(meta.get("sender") or "").strip().lower()
+    stem = subject_stem(meta.get("subject") or origin.get("title") or "")
+    if origin.get("kind") != "email" or not sender or not stem:
+        return None
+    pref_id = "mute:" + canonical_hash({"sender": sender, "stem": stem})[:16]
+    data = new_preference(
+        pref_id, instruction=f"Silenciado por el propietario desde «{task.get('title', '')[:80]}»: mensajes de {sender} sobre «{stem}».",
+        scope={"sender": sender, "subject_stem": stem, "kind": "email"}, effect="silent", origin="explicit",
+    )
+    try:
+        current = next((p for p in store.list_preferences() if p.get("id") == pref_id), None)
+        store.save_preference(data, expected_version=int(current.get("version") or 0) if current else 0, now=now, feedback_ref=task.get("id"))
+    except ValueError:
+        return None
+    return data
 
 
 def act_on_task(store: Any, config: dict[str, Any], *, task_id: str, action: str, actor: str, now_dt: datetime) -> dict[str, Any]:
@@ -222,6 +296,9 @@ def act_on_task(store: Any, config: dict[str, Any], *, task_id: str, action: str
         store.update_task(task_id, now=now, bump_version=False, muted=True)
         store.cancel_task_followups(task_id, now)
         outcome, text = "muted", t(language, "muted", title=title)
+        learned = learn_from_mute(store, task, now)
+        if learned:
+            text = t(language, "muted_with_preference", title=title, sender=learned.get("scope", {}).get("sender", ""))
     elif action == "done":
         for proposal in open_proposals:
             store.respond_proposal(proposal["id"], decision="declined", response={"actor": actor, "task_action": action}, now=now)
@@ -275,10 +352,15 @@ def resolve_reply(
 def _answer(store: Any, proposal_id: str, word: str) -> str:
     """A written yes/no answers a question as such: "yes" confirms a check and "no" reports the mistake."""
     try:
-        is_check = store.get_proposal(proposal_id).get("operation_id") == "check"
+        proposal = store.get_proposal(proposal_id)
     except KeyError:
-        is_check = False
-    if is_check:
+        proposal = {}
+    operation = proposal.get("operation_id")
+    if operation == "ask":  # a question's own two answers, first means yes
+        ids = [str(o.get("id")) for o in proposal.get("options") or [] if isinstance(o, dict) and o.get("id")]
+        if len(ids) >= 2:
+            return ids[0] if word == "yes" else ids[1]
+    if operation == "check":
         return "ok" if word == "yes" else "wrong"
     return "do" if word == "yes" else "no"
 

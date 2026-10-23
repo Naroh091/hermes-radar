@@ -4,7 +4,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Callable
 
 from .config import load_config
@@ -35,6 +37,20 @@ def utc_now() -> datetime:
 
 def iso(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+
+
+def job_budget(config: dict[str, Any], job: dict[str, Any], task: dict[str, Any]) -> tuple[int, int]:
+    """Turns and seconds for one job: an investigation or a fix on a work item gets the larger budget
+    (``jobs.investigate_turns`` / ``jobs.investigate_seconds``), everything else the plain one."""
+    jobs_cfg = config.get("jobs") or {}
+    turns, seconds = int(jobs_cfg.get("max_turns", 20)), int(jobs_cfg.get("max_seconds", 300))
+    if job.get("kind") != "native" and job.get("action_class") in ("read", "local") and task.get("kind") == "work_item":
+        turns = max(turns, int(jobs_cfg.get("investigate_turns", 60)))
+        seconds = max(seconds, int(jobs_cfg.get("investigate_seconds", 900)))
+    return turns, seconds
 
 
 class Runtime:
@@ -276,7 +292,14 @@ class Runtime:
                         allow = allowed_tools_for((self.store.get_proposal(job["proposal_id"]) or {}).get("operation_id"))
                     except Exception:
                         allow = ""
-                outcome = await self.runner.run(job, on_pid=on_pid, allow=allow)
+                task = {}
+                try:
+                    task = self.store.get_task(job["task_id"]) if job.get("task_id") else {}
+                except Exception:
+                    task = {}
+                turns, seconds = job_budget(self.config, job, task)
+                await self.ensure_checkout(job, task)
+                outcome = await self.runner.run(job, on_pid=on_pid, allow=allow, turns=turns, seconds=seconds)
         except asyncio.CancelledError:
             from .jobs.runner import JobOutcome
 
@@ -289,6 +312,43 @@ class Runtime:
             record_job_outcome(self.store, self.config, job=job, outcome=outcome, now_dt=self.clock())
         except Exception as exc:
             log.warning("job %s outcome not recorded: %s", job["id"], exc)
+
+    async def ensure_checkout(self, job: dict[str, Any], task: dict[str, Any]) -> None:
+        """A work item on a repository the owner has no checkout for gets one: a partial clone under radar's own
+        workspaces directory, reused by later steps. Reversible and private, so it needs no permission."""
+        if job.get("workdir") or job.get("kind") == "native":
+            return
+        jobs_cfg = self.config.get("jobs") or {}
+        if not jobs_cfg.get("auto_clone", True):
+            return
+        repo = str((task.get("entities") or {}).get("repo") or "").strip()
+        if not REPO_RE.match(repo):
+            return
+        root = Path(str(self.config.get("_hermes_home") or "")) / "radar" / "workspaces" if self.config.get("_hermes_home") else None
+        if root is None:
+            return
+        path = root / repo.lower()
+        if not (path / ".git").exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                process = await asyncio.create_subprocess_exec(
+                    "gh", "repo", "clone", repo, str(path), "--", "--filter=blob:none",
+                    stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
+                )
+                _, stderr = await asyncio.wait_for(process.communicate(), timeout=float(jobs_cfg.get("clone_seconds", 240)))
+            except (asyncio.TimeoutError, FileNotFoundError, OSError) as exc:
+                log.info("radar could not clone %s: %s", repo, exc)
+                return
+            if process.returncode != 0 or not (path / ".git").exists():
+                log.info("radar could not clone %s: %s", repo, (stderr or b"").decode("utf-8", "replace")[-200:])
+                return
+            log.info("radar cloned %s for task %s", repo, task.get("id"))
+        job["workdir"] = str(path)
+        job["worktree"] = True
+        try:
+            self.store.set_job_workdir(job["id"], str(path), iso(self.clock()))
+        except Exception:
+            pass
 
     # -- receiver -----------------------------------------------------------------------------
     def ensure_receiver(self) -> None:

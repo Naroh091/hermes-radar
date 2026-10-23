@@ -20,6 +20,8 @@ from .schemas import TASK_KINDS
 PROPOSAL_TTL_HOURS = 72
 SCHEDULED_TTL_HOURS = 48
 MIN_FACT_CONFIDENCE = 0.4
+INFERRED_FACT_CAP = 0.6  # a model's reading of a message never outranks what the owner said
+INTERRUPT_COOLDOWN_HOURS = 3
 
 
 @dataclass
@@ -131,6 +133,17 @@ def declined_recently(store: Any, task_id: str, now_dt: datetime, hours: int = D
 def awaiting_owner(store: Any, task_id: str) -> bool:
     """True while a notice about this task sits unanswered in the owner's chat (or sleeps until they asked)."""
     return bool(store.list_proposals(statuses=("sent", "snoozed"), task_id=task_id, limit=1))
+
+
+def interrupt_again(store: Any, config: dict[str, Any], task_id: str, urgency: str, now_dt: datetime) -> bool:
+    """A task with an unanswered notice may interrupt once more only for something that cannot wait and only
+    after the last message about it is older than the cooldown: five messages in two hours about one thread
+    is noise, whatever each mail says."""
+    if urgency != "now":
+        return False
+    hours = float((config.get("notifications") or {}).get("interrupt_cooldown_hours", INTERRUPT_COOLDOWN_HOURS))
+    last = parse_iso(store.last_notice_at(task_id)) if hasattr(store, "last_notice_at") else None
+    return last is None or now_dt - last >= timedelta(hours=hours)
 
 
 def matches_declined(item: dict[str, Any], declined: list[dict[str, str]]) -> bool:
@@ -257,15 +270,17 @@ def apply(
     decision = match["decision"]
     planned = plan["task"]
     facts_written = 0
+    # What a model reads into a mail or a chat is a hypothesis, never knowledge: it is stored as "inferred",
+    # capped below any fact the owner stated, and the planner must ask before building on it.
     for fact in extract.get("facts_learned") or []:
         if fact.get("confidence", 0) >= MIN_FACT_CONFIDENCE:
             try:
                 store.upsert_fact(
-                    key=fact["key"], value=fact["value"], confidence=fact["confidence"],
-                    provenance={"signal_id": signals[0]["id"] if signals else None, "at": now}, now=now,
+                    key=fact["key"], value=fact["value"], confidence=min(float(fact["confidence"]), INFERRED_FACT_CAP),
+                    provenance={"signal_id": signals[0]["id"] if signals else None, "at": now, "origin": "inferred"}, now=now,
                 )
                 facts_written += 1
-            except (ValueError, KeyError):
+            except (ValueError, KeyError, TypeError):
                 continue
 
     task = existing_task
@@ -370,7 +385,7 @@ def apply(
     proposal_ids: list[str] = []
     if not terminal or inform_only:  # news about a task that just completed still reaches the owner
         batch_key = "now" if owner_followup else {"notify_now": "now", "digest": "digest", "silent": "silent"}[disposition]
-        if batch_key == "now" and not owner_followup and urgency != "now" and awaiting_owner(store, task_id):
+        if batch_key == "now" and not owner_followup and awaiting_owner(store, task_id) and not interrupt_again(store, config, task_id, urgency, now_dt):
             batch_key = "digest"  # the owner already has an unanswered notice about this task: no second interruption
         slot = next_delivery(now_dt, "today" if urgency == "now" else urgency, config) if batch_key == "digest" else None
         candidates: list[dict[str, Any]] = []

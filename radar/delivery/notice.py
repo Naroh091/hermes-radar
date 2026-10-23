@@ -129,8 +129,8 @@ def _compose(task: dict[str, Any], proposals: list[dict[str, Any]], *, language:
         lines.extend(["", f"<b>{_esc(t(language, 'findings'))}:</b>"] + [f"• {_esc(fit(f, 300))}" for f in findings[:5]])
     buttons: list[list[dict[str, str]]] = []
     news = [p for p in proposals if p.get("operation_id") == "inform"][:1]
-    checks = [p for p in proposals if p.get("operation_id") == "check"]
-    steps = [p for p in proposals if p.get("operation_id") not in ("inform", "check")]
+    checks = [p for p in proposals if p.get("operation_id") in ("check", "ask")]  # questions the owner answers, not steps
+    steps = [p for p in proposals if p.get("operation_id") not in ("inform", "check", "ask")]
     ordered: list[dict[str, Any]] = list(news)
     asks = [p for p in news if (p.get("params") or {}).get("ask")]
     for item in news:

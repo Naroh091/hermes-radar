@@ -42,9 +42,11 @@ def compact_task(task: dict[str, Any]) -> dict[str, Any]:
 OPEN_STATUSES = ("open", "waiting", "needs_user", "in_progress", "snoozed")
 
 
-def candidate_tasks(store: Any, extract: dict[str, Any], *, limit: int = 6, session_id: str = "") -> list[dict[str, Any]]:
-    """Open tasks the bundle may refer to. A conversation bundle starts with the tasks born from the
-    same session and never gets the same-kind fallback: sharing a kind is not sharing a subject."""
+def candidate_tasks(store: Any, extract: dict[str, Any], *, limit: int = 6, session_id: str = "", group_key: str = "") -> list[dict[str, Any]]:
+    """Open tasks the bundle may refer to. A task already fed by the same thread (``group_key``) comes
+    first: a second advisory in the same mail thread is the same task, whatever its wording. A conversation
+    bundle starts with the tasks born from the same session and never gets the same-kind fallback: sharing a
+    kind is not sharing a subject."""
     entities = extract.get("entities") or {}
     if session_id:
         # Words shared with an unrelated task mean nothing here; only identifiers, repos and links do.
@@ -52,6 +54,9 @@ def candidate_tasks(store: Any, extract: dict[str, Any], *, limit: int = 6, sess
     else:
         query = " ".join([extract.get("title", ""), extract.get("summary", ""), _entities_text(entities)])
     found: dict[str, dict[str, Any]] = {}
+    if group_key and not session_id and hasattr(store, "tasks_for_group"):
+        for task in store.tasks_for_group(group_key, statuses=OPEN_STATUSES, limit=limit):
+            found[task["id"]] = task
     if session_id:
         for task in store.tasks_for_session(session_id, statuses=OPEN_STATUSES, limit=limit):
             found[task["id"]] = task

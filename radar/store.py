@@ -727,6 +727,21 @@ class Store:
                 )
         return len(inactive)
 
+    def ensure_owner_source(self, now: str) -> str:
+        """The source of the owner's own answers (a button pressed, a written yes or no), so they can travel
+        through the pipeline like any other signal and re-plan the task they answer."""
+        source_id = "local:owner"
+        with self.transaction() as db:
+            db.execute(
+                """INSERT INTO sources
+                (id, profile_key, owner_id, created_at, updated_at, revision, kind, account_ref,
+                 resource_scope_json, enabled, permission_revision, cursor_json, last_success_at, retention_days)
+                VALUES (?, ?, ?, ?, ?, 1, 'owner', 'owner', '{}', 1, 1, '{}', NULL, 365)
+                ON CONFLICT(profile_key, owner_id, id) DO NOTHING""",
+                (source_id, *self._scope_values, now, now),
+            )
+        return source_id
+
     def ensure_local_observation_source(self, now: str, retention_days: int) -> str:
         source_id = "local:session-hooks"
         with self.transaction() as db:
@@ -1552,18 +1567,50 @@ class Store:
                 count += cursor.rowcount
         return count
 
-    def defer_signals(self, signals: list[dict[str, Any]], *, next_attempt_at: str, error: str, now: str) -> int:
+    def defer_signals(self, signals: list[dict[str, Any]], *, next_attempt_at: str, error: str, now: str,
+                      counts_attempt: bool = True) -> int:
+        """Put the signals back in the queue for later. ``counts_attempt=False`` is for waits that are nobody's
+        failure (the conversation is still going, the model or the budget is unavailable): the claim that
+        brought the bundle here is not charged, so a long chat is never dropped for merely lasting."""
+        attempts = "attempts" if counts_attempt else "MAX(0, attempts-1)"
         count = 0
         with self.transaction() as db:
             for signal in signals:
                 cursor = db.execute(
-                    """UPDATE signals SET next_attempt_at=?, triage_reason=?, lease_until=NULL,
+                    f"""UPDATE signals SET next_attempt_at=?, triage_reason=?, lease_until=NULL, attempts={attempts},
                               updated_at=?, revision=revision+1
                        WHERE profile_key=? AND owner_id=? AND id=? AND triage_status='pending' AND fencing_token=?""",
                     (next_attempt_at, error[:300], now, *self._scope_values, signal["id"], signal["fencing_token"]),
                 )
                 count += cursor.rowcount
         return count
+
+    def last_notice_at(self, task_id: str) -> str | None:
+        """When the owner last got a message about this task (None when never)."""
+        row = self.db.execute(
+            "SELECT MAX(created_at) FROM outbox WHERE profile_key=? AND owner_id=? AND task_id=? AND status NOT IN ('failed', 'cancelled', 'expired')",
+            (*self._scope_values, task_id),
+        ).fetchone()
+        return row[0] if row and row[0] else None
+
+    def tasks_for_group(self, group_key: str, *, statuses: tuple[str, ...] | None = None, limit: int = 6) -> list[dict[str, Any]]:
+        """Tasks already fed by a signal of the same group (the same mail thread, the same PR): the strongest
+        candidates when a new message of that thread arrives."""
+        if not group_key:
+            return []
+        clauses = ["t.profile_key=?", "t.owner_id=?", "s.group_key=?"]
+        params: list[Any] = [*self._scope_values, group_key]
+        if statuses:
+            clauses.append("t.status IN (%s)" % ",".join("?" for _ in statuses))
+            params.extend(statuses)
+        params.append(max(1, min(int(limit), 50)))
+        rows = self.db.execute(
+            f"""SELECT t.* FROM tasks t
+                JOIN task_signals ts ON ts.task_id=t.id AND ts.profile_key=t.profile_key AND ts.owner_id=t.owner_id
+                JOIN signals s ON s.id=ts.signal_id AND s.profile_key=t.profile_key AND s.owner_id=t.owner_id
+                WHERE {' AND '.join(clauses)} GROUP BY t.id ORDER BY MAX(t.updated_at) DESC LIMIT ?""", params,
+        ).fetchall()
+        return [self._decode(row) or {} for row in rows]
 
     def update_signal(self, signal_id: str, *, now: str, **fields: Any) -> None:
         allowed = {"title", "snippet", "raw_content", "raw_expires_at", "content_ref", "group_key", "meta", "extract"}
@@ -2030,6 +2077,14 @@ class Store:
                     claimed.append(item)
         return claimed
 
+    def set_job_workdir(self, job_id: str, workdir: str, now: str) -> None:
+        """The checkout a job ended up working in (a clone made on its behalf), kept for later steps."""
+        with self.transaction() as db:
+            db.execute(
+                "UPDATE jobs SET workdir=?, worktree=1, updated_at=? WHERE profile_key=? AND owner_id=? AND id=?",
+                (workdir, now, *self._scope_values, job_id),
+            )
+
     def set_job_pid(self, job_id: str, pid: int | None, now: str) -> None:
         with self.transaction() as db:
             db.execute(
@@ -2109,6 +2164,10 @@ class Store:
                   provenance_json=CASE WHEN excluded.confidence>=facts.confidence THEN excluded.provenance_json ELSE facts.provenance_json END""",
                 (f"fact:{key}", *self._scope_values, now, now, key, value.strip(), confidence, canonical_json(provenance)),
             )
+
+    def record_owner_fact(self, *, key: str, value: str, provenance: dict[str, Any], now: str) -> None:
+        """A fact the owner stated themselves: full confidence, origin "owner", never overridden by a guess."""
+        self.upsert_fact(key=key, value=value, confidence=1.0, provenance={**provenance, "origin": "owner"}, now=now)
 
     def list_facts(self, limit: int = 100) -> list[dict[str, Any]]:
         rows = self.db.execute(

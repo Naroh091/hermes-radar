@@ -12,15 +12,15 @@ RULES = {
         "post, book, pay, create drafts, push, or modify anything outside your scratch directory."
     ),
     "local": (
-        "Allowed effects: reversible and private only. You may create drafts, branches, local files, worktrees "
-        "and draft pull requests marked as drafts. Never send email or messages, never merge, deploy, pay, book, "
-        "publish, or push to protected branches. When the step changes code: work on a new branch in the worktree, "
-        "commit, push that branch (never a protected one) and return its name in \"branch\" and the repository in "
-        "\"repo\"; do not open the pull request yourself: radar opens it as a draft with an origin mark in a later "
-        "step. When the step prepares a reply or message, save it as a draft "
-        "in the owner's mailbox with the mail tools (never send it) and return its complete text in "
-        "\"proposed_reply\" and the draft id in \"refs\": the owner reads and approves it from the notification. "
-        "Only tasks with a correspondent (an email thread, an issue) get a proposed_reply; otherwise leave it empty."
+        "Allowed effects: reversible and private only. You may create branches, local files, worktrees, draft pull "
+        "requests marked as drafts and, only when the step itself is to write a reply, a mail draft. Never send email "
+        "or messages, never merge, deploy, pay, book, publish, or push to protected branches. When the step changes "
+        "code: work on a new branch in the worktree, commit, push that branch (never a protected one) and return its "
+        "name in \"branch\" and the repository in \"repo\"; do not open the pull request yourself: radar opens it as "
+        "a draft with an origin mark in a later step. Only when the step is explicitly a reply (operation "
+        "gmail.create_draft) save the text as a draft in the owner's mailbox with the mail tools (never send it) and "
+        "return it in \"proposed_reply\" with the draft id in \"refs\"; in every other step leave proposed_reply "
+        "empty: the owner wants the work done, not mail about it."
     ),
     "external": (
         "Allowed effects: exactly one external action, the one the owner approved below, and nothing else "
@@ -29,6 +29,24 @@ RULES = {
     ),
 }
 
+PLAYBOOK = (
+    "HOW TO WORK A BUG, AN OUTAGE OR A REQUEST (do as much of this as the step allows, in this order):\n"
+    "1. Evidence first: open every attachment of the mails below (download it with the mail tools and read the "
+    "image, PDF or log), read the full thread, and reproduce the symptom yourself against the live site, feed, "
+    "API or service.\n"
+    "2. Locate the system: which repository holds it (search the owner's organizations with gh; the owner's facts "
+    "and the working directory may already say), which version is deployed (image tags, release, Coolify, the "
+    "server), which domain and DNS (the Cloudflare tools) and where it is hosted. Write down what you verified.\n"
+    "3. Compare with the public specification of whatever is failing (a feed format, an API contract, a protocol) "
+    "and with the code of the deployed version, not just the default branch.\n"
+    "4. Find the root cause in that code and, when the step allows changes, prepare the fix on a branch with a test "
+    "or a reproduction, commit and push it: radar opens the draft pull request.\n"
+    "5. Report facts you verified apart from what you could not, and name the single question the owner must answer "
+    "if one blocks you (who operates a system, access you lack): never assume it, never answer the correspondent "
+    "instead. Access data for a system the owner operates may be found in their mailbox or password-manager tools; "
+    "use it only to read and diagnose, never to change infrastructure."
+)
+
 RESULT_FORMAT = """Finish with a final JSON object inside a ```json fenced block, exactly once, with these keys:
 {"summary": "<2-5 sentences for the owner>", "findings": ["<verified fact>", ...],
  "refs": ["<url, path, PR, message id, draft id>", ...], "proposed_reply": "<complete draft reply or empty string>",
@@ -36,6 +54,12 @@ RESULT_FORMAT = """Finish with a final JSON object inside a ```json fenced block
  "branch": "<name of the branch you pushed, or empty>", "repo": "<owner/name of that repository, or empty>",
  "pr": "<url of an existing pull request for it, or empty>"}
 Separate verified facts from uncertainties. If evidence is insufficient, say so instead of inventing it."""
+
+
+def _origin(fact: dict[str, Any]) -> str:
+    provenance = fact.get("provenance") if isinstance(fact.get("provenance"), dict) else {}
+    origin = str(provenance.get("origin") or "")
+    return origin if origin in ("owner", "verified", "inferred") else "inferred"
 
 
 def build_job_prompt(
@@ -108,11 +132,19 @@ def build_job_prompt(
                 lines.append("  " + " ".join(str(body).split())[:2500])
             if meta.get("content_ref") or signal.get("content_ref"):
                 lines.append(f"  ref: {signal.get('content_ref') or meta.get('content_ref')}")
-    if facts:
+    stated = [f for f in facts if _origin(f) in ("owner", "verified")]
+    guessed = [f for f in facts if _origin(f) == "inferred"]
+    if stated:
         lines.append("")
-        lines.append("OWNER FACTS: " + "; ".join(f"{f.get('key')}={f.get('value')}" for f in facts[:30]))
+        lines.append("OWNER FACTS (stated by the owner or verified; rely on them): " + "; ".join(f"{f.get('key')}={f.get('value')}" for f in stated[:30]))
+    if guessed:
+        lines.append("")
+        lines.append("UNVERIFIED ASSUMPTIONS (a model read these into some message; never assert them to anyone, verify or ask): "
+                     + "; ".join(f"{f.get('key')}={f.get('value')}" for f in guessed[:20]))
+    if task.get("kind") == "work_item" and action_class in ("read", "local"):
+        lines.extend(["", PLAYBOOK])
     if workdir:
         lines.append("")
-        lines.append(f"Working directory: {workdir}. Load the relevant skills before touching the code.")
+        lines.append(f"Working directory: {workdir} (a checkout of the repository; use a worktree and a new branch). Load the relevant skills before touching the code.")
     lines.extend(["", f"Write the summary, findings and proposed reply in {language}.", RESULT_FORMAT])
     return "\n".join(lines)

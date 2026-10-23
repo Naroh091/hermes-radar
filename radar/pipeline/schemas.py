@@ -99,6 +99,7 @@ PLAN_SCHEMA = _obj(
             "when": _STR,
             "urgency": {"type": "string", "enum": ["low", "normal", "high"]},
             "options": _arr(_obj({"id": _STR, "label": _STR})),
+            "fact": _obj({"key": _STR, "yes": _STR, "no": _STR}),  # only for "ask": what each answer records
         })),
         "notify": _obj({
             "disposition": {"type": "string", "enum": DISPOSITIONS},

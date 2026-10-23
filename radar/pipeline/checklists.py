@@ -26,7 +26,6 @@ CHECKLISTS: dict[str, list[str]] = {
         "issue reproduced",
         "root cause identified",
         "fix branch or pull request prepared",
-        "reporter answered",
         "deployed or verified in production",
     ],
     "commitment": [

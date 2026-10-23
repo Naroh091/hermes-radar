@@ -129,6 +129,17 @@ def block_message(tool_name: Any, job_class: str) -> str:
     )
 
 
+OWN_CALENDAR_STEMS = frozenset({"create_event", "update_event"})
+
+
+def _own_calendar_entry(stem: str, args: Any) -> bool:
+    """An entry in the owner's own calendar with nobody invited is a reminder: private and reversible."""
+    if stem not in OWN_CALENDAR_STEMS or not isinstance(args, dict):
+        return False
+    attendees = args.get("attendees") or args.get("guests") or args.get("invitees") or []
+    return not attendees
+
+
 def guard_tool_call(tool_name: str = "", args: Any = None, *, environ: Mapping[str, str] | None = None, **_: Any) -> dict[str, str] | None:
     """``pre_tool_call`` hook: ``{"action": "block", "message"}`` inside a job child for an external tool the step
     was not granted; ``None`` (let it run) everywhere else. Outside a job child the hook is inert."""
@@ -137,6 +148,8 @@ def guard_tool_call(tool_name: str = "", args: Any = None, *, environ: Mapping[s
         return None
     stem = tool_stem(tool_name)
     if not is_external(stem):
+        return None
+    if env.get(CLASS_ENV, "read") == "local" and _own_calendar_entry(stem, args):
         return None
     allow = parse_allow(env.get(ALLOW_ENV, ""))
     if stem in allow or str(tool_name or "").lower() in allow:

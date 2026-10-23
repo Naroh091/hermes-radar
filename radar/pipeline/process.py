@@ -53,11 +53,34 @@ def _synthetic_extract_from_refresh(signal: dict[str, Any], task: dict[str, Any]
     }
 
 
+def _synthetic_extract_from_reply(signal: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
+    """The owner answered a question about the task: the fact is already recorded, the plan starts again from it."""
+    meta = signal.get("meta") or {}
+    return {
+        "relevant": True, "category": task.get("kind", "other"), "title": task.get("title", ""),
+        "summary": signal.get("snippet", ""), "disposition": "digest", "reason": "owner_answer",
+        "urgency": "medium", "impact": "medium", "risk_flags": [],
+        "entities": {}, "expectations": [], "facts_learned": [], "proposed_reply": "",
+        "keep_full_content": False, "needs_thread": False,
+        "owner_answer": {"question": meta.get("question", ""), "answer": meta.get("answer", ""), "fact": meta.get("fact") or {}},
+    }
+
+
+def _synthetic_extract(signal: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
+    meta = signal.get("meta") or {}
+    if signal.get("kind") == "user_reply":
+        return _synthetic_extract_from_reply(signal, task)
+    if meta.get("refresh"):
+        return _synthetic_extract_from_refresh(signal, task)
+    return _synthetic_extract_from_job(signal, task)
+
+
 def _bound_task_id(signals: list[dict[str, Any]]) -> str:
-    """The task a bundle already belongs to: job and cron results, or a refresh of the task's own artifact."""
+    """The task a bundle already belongs to: job and cron results, the owner's answer to one of its questions,
+    or a refresh of the task's own artifact."""
     if not signals:
         return ""
-    if all(s.get("kind") in ("job_result", "cron_result") for s in signals) or all((s.get("meta") or {}).get("refresh") for s in signals):
+    if all(s.get("kind") in ("job_result", "cron_result", "user_reply") for s in signals) or all((s.get("meta") or {}).get("refresh") for s in signals):
         return str((signals[0].get("meta") or {}).get("task_id") or "")
     return ""
 
@@ -108,7 +131,8 @@ async def process_bundle(rt: Any, bundle: dict[str, Any], now_dt: datetime) -> d
     session_id = session_of(signals) if is_conversation(signals) else ""
     if session_id and session_active(store, session_id, now_dt, config):
         # The conversation is still doing the work: learn from it once it goes quiet.
-        store.defer_signals(signals, next_attempt_at=iso(now_dt + timedelta(minutes=quiet_minutes(config))), error="session_active", now=now)
+        store.defer_signals(signals, next_attempt_at=iso(now_dt + timedelta(minutes=quiet_minutes(config))), error="session_active", now=now,
+                            counts_attempt=False)  # waiting for the owner to finish talking is not a failed attempt
         summary["deferred"] = "session_active"
         return summary
     bound = _bound_task_id(signals)
@@ -125,7 +149,7 @@ async def process_bundle(rt: Any, bundle: dict[str, Any], now_dt: datetime) -> d
         if not kept:
             return summary
     if not gate.available:
-        store.defer_signals(kept, next_attempt_at=iso(now_dt + timedelta(minutes=RETRY_MINUTES)), error="llm unavailable", now=now)
+        store.defer_signals(kept, next_attempt_at=iso(now_dt + timedelta(minutes=RETRY_MINUTES)), error="llm unavailable", now=now, counts_attempt=False)
         summary["deferred"] = "llm_unavailable"
         return summary
     max_attempts = int(config.get("limits", {}).get("signal_attempts", 5))
@@ -138,7 +162,7 @@ async def process_bundle(rt: Any, bundle: dict[str, Any], now_dt: datetime) -> d
     try:
         if existing_task is not None:
             last = kept[-1]
-            extracted = (_synthetic_extract_from_refresh if (last.get("meta") or {}).get("refresh") else _synthetic_extract_from_job)(last, existing_task)
+            extracted = _synthetic_extract(last, existing_task)
             candidates = []
         else:
             conversation = None
@@ -157,7 +181,7 @@ async def process_bundle(rt: Any, bundle: dict[str, Any], now_dt: datetime) -> d
                 _apply_retention(store, kept, keep=False, config=config, now_dt=now_dt)
                 summary["result"] = "noise"
                 return summary
-            candidates = correlate.candidate_tasks(store, extracted, session_id=session_id)
+            candidates = correlate.candidate_tasks(store, extracted, session_id=session_id, group_key=str(kept[0].get("group_key") or ""))
         if existing_task is not None:
             existing_task = task_context(store, existing_task)
         recalled = await recall_job
@@ -169,7 +193,7 @@ async def process_bundle(rt: Any, bundle: dict[str, Any], now_dt: datetime) -> d
         )
     except BudgetExhausted:
         recall_job.cancel()
-        store.defer_signals(kept, next_attempt_at=iso(now_dt + timedelta(hours=BUDGET_RETRY_HOURS)), error="budget_exhausted", now=now)
+        store.defer_signals(kept, next_attempt_at=iso(now_dt + timedelta(hours=BUDGET_RETRY_HOURS)), error="budget_exhausted", now=now, counts_attempt=False)
         summary["deferred"] = "budget"
         return summary
     except LlmError as exc:

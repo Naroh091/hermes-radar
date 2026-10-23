@@ -311,7 +311,9 @@ class Scheduler:
         max_concurrent = int(self.config.get("jobs", {}).get("max_concurrent", 2))
         free = max(0, max_concurrent - len(self.runtime.job_tasks))
         if free:
-            lease = iso(now_dt + timedelta(seconds=int(self.config.get("jobs", {}).get("max_seconds", 300)) + 120))
+            jobs_cfg = self.config.get("jobs", {})
+            longest = max(int(jobs_cfg.get("max_seconds", 300)), int(jobs_cfg.get("investigate_seconds", 900)))
+            lease = iso(now_dt + timedelta(seconds=longest + 300))  # covers an investigation plus a clone
             for job in self.store.claim_queued_jobs(now, lease, free):
                 if self.runtime.spawn_job(job) is not None:
                     started += 1

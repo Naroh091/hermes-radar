@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from ..preferences import applicable
+from ..preferences import applicable, subject_stem
 from . import rules
 
 
@@ -25,6 +25,7 @@ def _observation(signal: dict[str, Any]) -> dict[str, Any]:
         "kind": signal.get("kind", ""),
         "source_kind": meta.get("source_kind", signal.get("kind", "")),
         "repo": meta.get("repo", ""),
+        "subject_stem": subject_stem(meta.get("subject") or signal.get("title") or ""),
     }
 
 

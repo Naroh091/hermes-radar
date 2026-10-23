@@ -138,10 +138,12 @@ class JobRunner:
         env.setdefault("HERMES_ACCEPT_HOOKS", "1")
         return env
 
-    async def run(self, job: dict[str, Any], *, on_pid: Any = None, allow: str = "") -> JobOutcome:
-        timeout = float(self.max_seconds)
+    async def run(self, job: dict[str, Any], *, on_pid: Any = None, allow: str = "", turns: int | None = None,
+                  seconds: int | None = None) -> JobOutcome:
+        """``turns``/``seconds`` override the runner's budgets for this job (an investigation gets more room)."""
+        timeout = float(seconds or self.max_seconds)
         argv = build_argv(
-            hermes_bin=self.hermes_bin, max_turns=self.max_turns, run_budget=int(timeout), workdir=job.get("workdir"),
+            hermes_bin=self.hermes_bin, max_turns=int(turns or self.max_turns), run_budget=int(timeout), workdir=job.get("workdir"),
             worktree=bool(job.get("worktree")), toolsets=list(job.get("toolsets") or []),
             skills=list(job.get("skills") or []), model=self.model, extra_args=self.extra_args,
         )
@@ -166,7 +168,7 @@ class JobRunner:
         final = extract_final_json(text) or {}
         summary = str(final.get("summary") or text)[:6000]
         anomaly = record.get("error") or (f"exit {record.get('exit_code')}" if record.get("exit_code") not in (0, None) else "")
-        usage = {k: record.get(k) for k in ("usage", "cost_usd", "turns", "duration_ms") if record.get(k) is not None}
+        usage = {k: record.get(k) for k in ("usage", "tokens", "cost_usd", "turns", "duration_ms") if record.get(k) is not None}
         session_ref = str(record.get("session_id") or "") or None
         if not summary:
             return JobOutcome("failed", error=str(anomaly or "empty job result")[:300], exit_code=code, session_ref=session_ref)

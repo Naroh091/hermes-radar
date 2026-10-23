@@ -12,7 +12,21 @@ DIMENSIONS = frozenset({"notification", "investigation", "response"})
 EFFECTS = frozenset({"silent", "digest", "notify", "prefer"})
 ORIGINS = frozenset({"explicit", "inferred", "imported"})
 STATUSES = frozenset({"active", "candidate", "disabled"})
-SCOPE_FIELDS = ("account", "sender", "message_type", "project", "kind", "source_kind", "repo")
+SCOPE_FIELDS = ("account", "sender", "message_type", "project", "kind", "source_kind", "repo", "subject_stem")
+
+
+def subject_stem(subject: Any) -> str:
+    """The part of a subject that repeats across a family of messages: lowercase, without list tags,
+    numbers, dates or reply prefixes, first five words. «[MalditaEs] A security advisory on markdown-it
+    affects…» and «Alerta de seguridad» each become a stem a mute can hang on."""
+    import re
+
+    text = str(subject or "").lower()
+    text = re.sub(r"^\s*((re|fwd?|fw|rv|aw|sv)\s*:\s*)+", "", text)
+    text = re.sub(r"\[[^\]]*\]", " ", text)
+    text = re.sub(r"[#\d][\w./-]*", " ", text)
+    words = [w for w in re.split(r"[^\wáéíóúüñ]+", text) if w]
+    return " ".join(words[:5])
 
 
 def validate_preference(data: Any) -> dict[str, Any]:
