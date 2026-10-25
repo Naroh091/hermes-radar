@@ -1,7 +1,7 @@
 """Run one bounded Hermes session per job through the public CLI (ported from mail-intelligence).
 
-Each job is a child ``hermes chat`` process with a real turn budget (``--max-turns``), a real time
-budget (``--run-budget``) and a wall-clock ceiling enforced here. The child never gets to execute
+Each job is a child ``hermes chat`` process with a real turn budget (``--max-turns``) and a wall-clock
+ceiling enforced here (the gateway refuses a per-run ``--run-budget``). The child never gets to execute
 external effects: the prompt restricts it, the tool firewall (``radar.jobs.firewall``, fed through the
 child's environment) refuses external tools before they run, and external operations go through consent.
 """
@@ -97,15 +97,16 @@ def _object(candidate: str) -> dict[str, Any] | None:
     return parsed if isinstance(parsed, dict) else None
 
 def build_argv(
-    *, hermes_bin: str, max_turns: int, run_budget: int, workdir: str | None, worktree: bool,
+    *, hermes_bin: str, max_turns: int, workdir: str | None,
     toolsets: list[str], skills: list[str], model: str | None, extra_args: tuple[str, ...] = (),
 ) -> list[str]:
+    # The gateway refuses --run-budget and --worktree for a programmatic chat (hermes_cli.gateway_chat
+    # ._UNSUPPORTED): the run budget is the parent's wall-clock kill in JobRunner.run, and a code job
+    # runs in its own private checkout through --in, not in an isolated worktree.
     argv = [hermes_bin, "chat", "--query-file", "-", "--oneshot", "--format", "stream-json",
-            "--max-turns", str(max_turns), "--run-budget", str(int(run_budget))]
+            "--max-turns", str(max_turns)]
     if workdir:
         argv += ["--in", workdir]
-    if worktree:
-        argv.append("--worktree")
     if toolsets:
         argv += ["-t", ",".join(toolsets)]
     if skills:
@@ -143,8 +144,8 @@ class JobRunner:
         """``turns``/``seconds`` override the runner's budgets for this job (an investigation gets more room)."""
         timeout = float(seconds or self.max_seconds)
         argv = build_argv(
-            hermes_bin=self.hermes_bin, max_turns=int(turns or self.max_turns), run_budget=int(timeout), workdir=job.get("workdir"),
-            worktree=bool(job.get("worktree")), toolsets=list(job.get("toolsets") or []),
+            hermes_bin=self.hermes_bin, max_turns=int(turns or self.max_turns), workdir=job.get("workdir"),
+            toolsets=list(job.get("toolsets") or []),
             skills=list(job.get("skills") or []), model=self.model, extra_args=self.extra_args,
         )
         prompt = str(job.get("prompt") or "")

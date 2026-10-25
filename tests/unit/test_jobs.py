@@ -21,8 +21,10 @@ def test_parse_stream_and_final_json():
     final = extract_final_json(record["text"])
     assert final["summary"] == "Found 3 hotels" and final["refs"] == ["https://x"]
     assert extract_final_json("no json here {not: valid}") is None
-    argv = build_argv(hermes_bin="hermes", max_turns=5, run_budget=60, workdir="/repo", worktree=True, toolsets=["web"], skills=["s"], model=None)
-    assert argv[:5] == ["hermes", "chat", "--query-file", "-", "--oneshot"] and "--worktree" in argv and argv[argv.index("--in") + 1] == "/repo"
+    argv = build_argv(hermes_bin="hermes", max_turns=5, workdir="/repo", toolsets=["web"], skills=["s"], model=None)
+    assert argv[:5] == ["hermes", "chat", "--query-file", "-", "--oneshot"]
+    # The gateway rejects --run-budget and --worktree for a programmatic chat; a code job runs in --in.
+    assert "--run-budget" not in argv and "--worktree" not in argv and argv[argv.index("--in") + 1] == "/repo"
 
 
 def test_runner_with_fake_spawn_handles_success_timeout_and_missing_result():
