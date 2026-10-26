@@ -183,7 +183,9 @@ def test_a_work_item_is_investigated_and_fixed_not_replied_to():
                             action_class="read", signals=[], facts=[], owner={"language": "es"}, workdir=None)
     assert "HOW TO WORK A BUG" not in trip
     assert "draft a reply" not in reason.PLAN_PROMPT and "work done, not mail written" in reason.PLAN_PROMPT
-    assert '"ask" (read) is a question' in reason.PLAN_PROMPT and "guess what the facts do not say" in reason.PLAN_PROMPT
+    assert '"ask" (read) is a question' in reason.PLAN_PROMPT and "reason first" in reason.PLAN_PROMPT
+    # Reason from the evidence instead of asking the obvious; never confirm an observation or a mechanical state.
+    assert "Do not ask to confirm what the evidence" in reason.PLAN_PROMPT and "do not ask whether it is behind" in reason.PLAN_PROMPT
 
 
 def test_an_investigation_gets_room_to_work():
