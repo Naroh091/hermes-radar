@@ -99,6 +99,28 @@ def test_the_model_writes_the_reminder_and_the_template_stands_in(store):
     assert asyncio.run(compose(LlmGate(FakeContext(cfg), store, cfg), items=selection["items"], language="en")).startswith("By the way, “Fallo de fotos")
 
 
+def test_the_item_carries_the_task_facts_so_the_model_can_place_it(store):
+    cfg = active_config()
+    verify_destination(store)
+    _task(store, "dns", "Cesión de factchequeado.com", due_at="2026-11-03T10:00:00Z",
+          entities={"people": ["Ximena", "David Fernández"], "organizations": ["Factchequeado"],
+                    "dates": [{"label": "Firma", "when": "2026-11-03"}],
+                    "amounts": [{"label": "Primer pago", "value": 200, "currency": "USD"}],
+                    "repo": "MalditaEs/DMS", "identifiers": [{"label": "código", "value": "23959886ad5c"}],
+                    "session_id": "20260926_x", "draft": {"text": "no", "ref": "", "at": NOW_S}})
+    _proposal(store, "d-dns", "dns", "¿Les pido que firmen ya?", urgency="high")
+    selection = select_reminder(store, cfg, NOW)
+    llm = FakeLlm({"radar.remind": [{"text": "El contrato de cesión de factchequeado.com con Ximena solo espera la firma antes del 3 de noviembre, ¿les pido que firmen ya?"}]})
+    gate = LlmGate(FakeContext(cfg, llm=llm), store, cfg, clock=lambda: NOW)
+    asyncio.run(compose(gate, items=selection["items"], language="es"))
+    facts = json.loads(llm.calls[0]["input"][0]["text"])["items"][0]["facts"]
+    assert facts["people"] == ["Ximena", "David Fernández"] and facts["organizations"] == ["Factchequeado"]
+    assert facts["dates"] == ["Firma: 2026-11-03"] and facts["amounts"] == ["Primer pago 200 USD"] and facts["repo"] == "MalditaEs/DMS"
+    assert "identifiers" not in facts and "session_id" not in facts and "draft" not in facts  # internal/sensitive stays out
+    # The opener must not be a reflex greeting any more: no canned example list to latch onto.
+    assert "never by reflex" in REMIND_PROMPT and "vary the opening" not in REMIND_PROMPT
+
+
 def test_the_scheduler_composes_the_reminder_with_the_model(store, tmp_path):
     cfg = active_config()
     verify_destination(store)
