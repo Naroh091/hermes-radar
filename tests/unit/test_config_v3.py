@@ -47,3 +47,13 @@ def test_flat_job_limits_from_the_desktop_form_override_nested_sections():
     assert cfg["notifications"]["daily_limit"] == 20 and cfg["notifications"]["quiet_start"] == "22:00"
     assert config()["limits"]["jobs_per_day"] == 100
     assert any("jobs_per_day must be a positive integer" in e for e in validate_config(config(jobs_per_day=0))[1])
+
+
+def test_reminder_pace_is_configurable_from_the_desktop_form():
+    defaults = load_config(FakeContext({"enabled": True, "owner": {"id": "me"}}))["notifications"]
+    assert defaults["reminders_per_day"] == 20 and defaults["reminder_gap_minutes"] == 0 and defaults["digest_times"] == []
+    cfg = load_config(FakeContext({"enabled": True, "owner": {"id": "me"}, "reminders_per_day": 8, "reminder_gap_minutes": 45,
+                                   "notifications": {"reminders_per_day": 3}}))
+    assert cfg["notifications"]["reminders_per_day"] == 8 and cfg["notifications"]["reminder_gap_minutes"] == 45
+    assert any("reminders_per_day must be a positive integer" in e for e in validate_config(config(reminders_per_day=0))[1])
+    assert any("reminder_gap_minutes must be a non-negative" in e for e in validate_config(config(reminder_gap_minutes=-5))[1])

@@ -27,6 +27,8 @@
     "auto_jobs_per_task",
     "auto_job_cooldown_minutes",
     "notices_per_day",
+    "reminders_per_day",
+    "reminder_gap_minutes",
     "quiet_start",
     "quiet_end"
   ],
@@ -241,7 +243,10 @@
         "quiet_end",
         "quiet_start",
         "reminder_cooldown_hours",
+        "reminder_gap_minutes",
         "reminder_items",
+        "reminder_lead_minutes",
+        "reminders_per_day",
         "unanswered_hours"
       ],
       "properties": {
@@ -281,16 +286,24 @@
           "type": "integer",
           "default": 3
         },
+        "reminders_per_day": {
+          "type": "integer",
+          "default": 20
+        },
+        "reminder_gap_minutes": {
+          "type": "integer",
+          "default": 0
+        },
+        "reminder_lead_minutes": {
+          "type": "integer",
+          "default": 180
+        },
         "digest_times": {
           "type": "array",
           "items": {
             "type": "string"
           },
-          "default": [
-            "09:00",
-            "14:00",
-            "19:00"
-          ]
+          "default": []
         }
       }
     },
@@ -765,6 +778,22 @@
       ],
       "default": null,
       "description": "Flat key for the Desktop form; overrides notifications.daily_limit when set."
+    },
+    "reminders_per_day": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "default": null,
+      "description": "Flat key for the Desktop form; overrides notifications.reminders_per_day when set."
+    },
+    "reminder_gap_minutes": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "default": null,
+      "description": "Flat key for the Desktop form; overrides notifications.reminder_gap_minutes when set."
     },
     "quiet_start": {
       "type": [

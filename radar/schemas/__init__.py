@@ -30,7 +30,10 @@ CONFIG_DEFAULTS: dict[str, Any] = {
         "quiet_end": "08:00",
         "daily_limit": 3,
         "batch_minutes": 30,
-        "digest_times": ["09:00", "14:00", "19:00"],
+        "digest_times": [],
+        "reminders_per_day": 20,
+        "reminder_gap_minutes": 0,
+        "reminder_lead_minutes": 180,
         "reminder_cooldown_hours": 24,
         "reminder_items": 1,
         "unanswered_hours": 48,
@@ -62,6 +65,8 @@ CONFIG_DEFAULTS: dict[str, Any] = {
     "auto_jobs_per_task": None,
     "auto_job_cooldown_minutes": None,
     "notices_per_day": None,
+    "reminders_per_day": None,
+    "reminder_gap_minutes": None,
     "quiet_start": None,
     "quiet_end": None,
     "ingress": {
@@ -84,7 +89,7 @@ _NESTED_KEYS = {
     "context": {"memory", "sessions", "timeout_seconds", "max_chars", "session_results", "memory_tool"},
     "scheduler": {"tick_seconds", "max_concurrent_checks"},
     "notifications": {"enabled", "quiet_start", "quiet_end", "daily_limit", "batch_minutes", "digest_times", "reminder_cooldown_hours",
-                      "reminder_items", "unanswered_hours", "interrupt_cooldown_hours"},
+                      "reminders_per_day", "reminder_gap_minutes", "reminder_lead_minutes", "reminder_items", "unanswered_hours", "interrupt_cooldown_hours"},
     "limits": {"events_per_source_cycle", "checks_per_day", "llm_calls_per_day", "llm_input_tokens", "llm_output_tokens", "jobs_per_day", "max_bundles_per_tick", "signal_attempts"},
     "retention": {"observations_days", "results_days", "audit_days", "snippet_chars", "full_content_days", "full_content_kinds", "signals_days"},
     "mutations": {"enabled", "require_per_action_consent"},
@@ -252,7 +257,7 @@ def validate_config(value: Any) -> tuple[bool, list[str]]:
 
     for section, fields in {
         "scheduler": ("tick_seconds", "max_concurrent_checks"),
-        "notifications": ("daily_limit", "batch_minutes", "reminder_cooldown_hours", "reminder_items", "unanswered_hours", "interrupt_cooldown_hours"),
+        "notifications": ("daily_limit", "batch_minutes", "reminder_cooldown_hours", "reminders_per_day", "reminder_lead_minutes", "reminder_items", "unanswered_hours", "interrupt_cooldown_hours"),
         "limits": ("events_per_source_cycle", "checks_per_day", "llm_calls_per_day", "llm_input_tokens", "llm_output_tokens", "jobs_per_day", "max_bundles_per_tick", "signal_attempts"),
         "retention": ("observations_days", "results_days", "audit_days", "snippet_chars", "full_content_days", "signals_days"),
         "jobs": ("max_concurrent", "max_turns", "max_seconds", "max_auto_per_task"),
@@ -263,6 +268,8 @@ def validate_config(value: Any) -> tuple[bool, list[str]]:
         for field in fields:
             if not _positive_int(nested.get(field)):
                 errors.append(f"{section}.{field} must be a positive integer")
+    if isinstance(value.get("notifications"), dict) and not _non_negative_int(value["notifications"].get("reminder_gap_minutes")):
+        errors.append("notifications.reminder_gap_minutes must be a non-negative integer")
 
     observation = value.get("observation")
     if isinstance(observation, dict):
@@ -305,7 +312,7 @@ def validate_config(value: Any) -> tuple[bool, list[str]]:
                 errors.append(f"notifications.{field} must be HH:MM")
         times = notifications.get("digest_times")
         if not isinstance(times, list) or any(not isinstance(t, str) or len(t) != 5 or t[2] != ":" or not t[:2].isdigit() or not t[3:].isdigit() for t in times):
-            errors.append("notifications.digest_times must be an array of HH:MM strings (empty for a batch_minutes cadence)")
+            errors.append("notifications.digest_times must be an array of HH:MM strings (empty for reminders paced over the day)")
         if notifications.get("enabled") is True:
             if value.get("mode") != "active":
                 errors.append("notifications require active mode")
@@ -323,7 +330,7 @@ def validate_config(value: Any) -> tuple[bool, list[str]]:
     if value.get("trust_level") not in (None, *TRUST_LEVELS):
         errors.append("trust_level must be cautious, balanced or autonomous")
     for flat, check in (("jobs_per_day", _positive_int), ("auto_jobs_per_task", _positive_int), ("auto_job_cooldown_minutes", _non_negative_int),
-                        ("notices_per_day", _positive_int)):
+                        ("notices_per_day", _positive_int), ("reminders_per_day", _positive_int), ("reminder_gap_minutes", _non_negative_int)):
         if value.get(flat) is not None and not check(value.get(flat)):
             errors.append(f"{flat} must be a {'non-negative' if check is _non_negative_int else 'positive'} integer")
     for flat in ("quiet_start", "quiet_end"):

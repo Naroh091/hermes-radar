@@ -19,7 +19,8 @@ def _normalize(merged: dict[str, Any]) -> None:
     """Repair YAML quirks that are not configuration errors (``22:00`` parses as the integer 1320)."""
     notifications = merged.get("notifications")
     if isinstance(notifications, dict):
-        for flat, field in (("notices_per_day", "daily_limit"), ("quiet_start", "quiet_start"), ("quiet_end", "quiet_end")):
+        for flat, field in (("notices_per_day", "daily_limit"), ("reminders_per_day", "reminders_per_day"),
+                            ("reminder_gap_minutes", "reminder_gap_minutes"), ("quiet_start", "quiet_start"), ("quiet_end", "quiet_end")):
             value = merged.get(flat)
             if value is not None and not isinstance(value, bool):
                 notifications[field] = value  # flat keys (Desktop form) win over the nested section

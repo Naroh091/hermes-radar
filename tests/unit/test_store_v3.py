@@ -127,8 +127,9 @@ def test_snoozed_proposals_wake_and_jobs_lifecycle(store: Store):
         store.finish_job("j1", fencing_token=1, status="failed", summary=None, result={}, usage={}, error="x", now=LATER)
     store.create_job(job_id="j2", task_id="t1", proposal_id=None, kind="proposal", prompt="again", action_class="read", now=NOW)
     store.claim_queued_jobs(NOW, "2026-10-19T10:05:00Z", 2)
-    assert store.recover_stale_jobs("2026-10-19T10:10:00Z") == 1
-    assert store.get_job("j2")["status"] == "unknown"
+    [stale] = store.expired_job_leases("2026-10-19T10:10:00Z")
+    assert stale["id"] == "j2" and store.extend_job_lease("j2", fencing_token=stale["fencing_token"], lease_until="2026-10-19T10:30:00Z", now="2026-10-19T10:10:00Z")
+    assert store.expired_job_leases("2026-10-19T10:10:00Z") == []
 
 
 def test_facts_keep_highest_confidence_and_preferences_are_versioned(store: Store):

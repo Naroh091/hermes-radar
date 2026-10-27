@@ -12,12 +12,14 @@ from radar.schemas import CONFIG_DEFAULTS
 from radar.store import Scope, Store
 
 NOW = datetime(2026, 10, 19, 10, 0, tzinfo=timezone.utc)
+SLOTS = ["09:00", "14:00", "19:00"]  # the suite was written against fixed slots; paced reminders set digest_times: []
 
 
 def config(**overrides: Any) -> dict:
     cfg = deepcopy(CONFIG_DEFAULTS)
     cfg.update({"enabled": True, "owner": {"id": "owner-a", "timezone": "Europe/Madrid", "language": "es"}})
     cfg["observation"]["local_sessions"] = True
+    cfg["notifications"]["digest_times"] = list(SLOTS)
     for key, value in overrides.items():
         if isinstance(value, dict) and isinstance(cfg.get(key), dict):
             cfg[key] = {**cfg[key], **value}

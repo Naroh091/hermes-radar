@@ -1159,6 +1159,32 @@ class Store:
             if cursor.rowcount != 1:
                 raise RuntimeError("stale outbox fencing token")
 
+    def force_outbox(self, outbox_id: str, *, now: str) -> dict[str, Any]:
+        """An explicit owner request (``/radar next``): a queued message goes out on the next tick even in
+        quiet hours. Only rows nobody leased (pending/failed/unknown) can be forced."""
+        with self.transaction() as db:
+            row = db.execute(
+                "SELECT payload_json, status FROM outbox WHERE profile_key=? AND owner_id=? AND id=?",
+                (*self._scope_values, outbox_id),
+            ).fetchone()
+            if row is None:
+                raise KeyError(outbox_id)
+            if row["status"] not in ("pending", "failed", "unknown"):
+                raise ValueError(f"outbox not forceable: {row['status']}")
+            try:
+                payload = json.loads(row["payload_json"])
+            except (json.JSONDecodeError, TypeError):
+                payload = {}
+            if not isinstance(payload, dict):
+                payload = {}
+            payload["urgent"] = True
+            db.execute(
+                """UPDATE outbox SET payload_json=?, next_attempt_at=?, last_error=NULL, updated_at=?, revision=revision+1
+                   WHERE profile_key=? AND owner_id=? AND id=?""",
+                (canonical_json(payload), now, now, *self._scope_values, outbox_id),
+            )
+        return {"id": outbox_id, "payload": payload}
+
     def notification_count_since(self, since: str, *, include_exempt: bool = False) -> int:
         """Sent notices since ``since``; by default without those exempt from the daily cap (answers to approvals)."""
         exempt = "" if include_exempt else " AND COALESCE(json_extract(payload_json, '$.exempt'), 0) = 0"
@@ -2282,15 +2308,23 @@ class Store:
         ).fetchall()
         return [self._decode(row) or {} for row in rows]
 
-    def recover_stale_jobs(self, now: str) -> int:
+    def expired_job_leases(self, now: str) -> list[dict[str, Any]]:
+        """Running jobs whose lease ran out: still running in this process (the caller extends them) or lost."""
+        rows = self.db.execute(
+            """SELECT * FROM jobs WHERE profile_key=? AND owner_id=? AND status='running' AND lease_until IS NOT NULL AND lease_until<?
+               ORDER BY created_at, id""",
+            (*self._scope_values, now),
+        ).fetchall()
+        return [self._decode(row) or {} for row in rows]
+
+    def extend_job_lease(self, job_id: str, *, fencing_token: int, lease_until: str, now: str) -> bool:
         with self.transaction() as db:
             cursor = db.execute(
-                """UPDATE jobs SET status='unknown', error='lease expired', finished_at=?, lease_until=NULL,
-                          updated_at=?, revision=revision+1
-                   WHERE profile_key=? AND owner_id=? AND status='running' AND lease_until IS NOT NULL AND lease_until<?""",
-                (now, now, *self._scope_values, now),
+                """UPDATE jobs SET lease_until=?, updated_at=?, revision=revision+1
+                   WHERE profile_key=? AND owner_id=? AND id=? AND status='running' AND fencing_token=?""",
+                (lease_until, now, *self._scope_values, job_id, fencing_token),
             )
-        return cursor.rowcount
+        return cursor.rowcount == 1
 
     # -- facts and preferences --------------------------------------------------------------
     def upsert_fact(self, *, key: str, value: str, confidence: float, provenance: dict[str, Any], now: str) -> None:
