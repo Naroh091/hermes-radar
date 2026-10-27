@@ -19,6 +19,14 @@ NOISE_SUBJECT = re.compile(
     re.IGNORECASE,
 )
 STRONG_AUTOMATION = {"noreply-sender", "precedence:bulk", "precedence:list", "auto-submitted:auto-generated"}
+# Routine "you signed in" / "access to the portal" notices that a sede electrónica, bank or portal sends on every
+# login. They look transactional (certificate, security) but carry nothing to do: the owner wants them ignored.
+ACCESS_NOTICE = re.compile(
+    r"(se ha iniciado sesi[oó]n|sesi[oó]n iniciada|(?:nuevo )?inicio de sesi[oó]n|has iniciado sesi[oó]n|"
+    r"se ha accedido\b|acceso (?:con|mediante) (?:el |su |tu )?certificado|"
+    r"new sign[\- ]?in|signed in\b|new login\b|you (?:just )?logged in|we (?:noticed|detected) a (?:new )?sign[\- ]?in)",
+    re.IGNORECASE,
+)
 MIN_TURN_CHARS = 15
 TASKY_TURN = re.compile(
     r"\b(busca\w*|compra\w*|reserva\w*|planific\w*|organiz\w*|recu[eé]rda\w*|avisa\w*|prepara\w*|env[ií]a\w*|"
@@ -35,6 +43,10 @@ def subject_is_noise(subject: str) -> bool:
 
 def is_transactional(text: str) -> bool:
     return bool(TRANSACTIONAL.search(text or ""))
+
+
+def is_access_notice(text: str) -> bool:
+    return bool(ACCESS_NOTICE.search(text or ""))
 
 
 def is_tasky_turn(text: str) -> bool:

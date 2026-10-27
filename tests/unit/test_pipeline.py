@@ -36,6 +36,24 @@ def test_triage_rules_keep_transactional_automated_mail_and_drop_bulk():
     assert triage_signal(turn, []).priority == "normal"
 
 
+def test_triage_drops_routine_portal_access_notices():
+    # The sede electrónica's standard "you signed in" mail: transactional-looking (certificate), nothing to do.
+    sede = _email(automation=[])
+    sede["title"] = "Sesión iniciada desde un nuevo navegador web"
+    sede["snippet"] = ("Se ha iniciado sesión desde un nuevo navegador web en la sede electrónica usando el "
+                       "certificado digital de persona física de DAVID ALEJANDRO FERNANDEZ SANCHO.")
+    assert triage_signal(sede, []).keep is False and triage_signal(sede, []).reason == "access_notification"
+    newsignin = _email(automation=[])
+    newsignin["title"] = "New sign-in to your account"
+    newsignin["snippet"] = "We noticed a new sign-in from Chrome on Mac."
+    assert triage_signal(newsignin, []).keep is False
+    # A real thread about requesting access is not a login notice and still gets through.
+    request = _email(automation=[])
+    request["title"] = "Necesitamos acceso al backend EFCSN"
+    request["snippet"] = "¿Nos pasas la URL y un usuario de solo lectura?"
+    assert triage_signal(request, []).keep is True
+
+
 def test_extract_and_plan_validators_reject_out_of_range_values():
     parsed = extract_step.validate_extract(extract_answer())
     assert parsed["category"] == "trip" and parsed["entities"]["places"] == ["Lisboa"] and parsed["facts_learned"][0]["value"] == "42"
