@@ -14,6 +14,7 @@ from typing import Any
 from uuid import uuid4
 
 from ..delivery.cadence import upcoming_slot
+from ..delivery.dispatch import next_reminder_at
 from ..models import TASK_TERMINAL, canonical_hash
 
 log = logging.getLogger(__name__)
@@ -65,7 +66,7 @@ def _ensure_source(store: Any, config: dict[str, Any], now: str) -> None:
 
 def refresh_before_digest(store: Any, config: dict[str, Any], now_dt: datetime, *, provider: Any,
                           lead_minutes: int = LEAD_MINUTES) -> dict[str, int]:
-    """Look up the pull requests behind the digest items due at the slot starting within ``lead_minutes``.
+    """Look up the pull requests behind the digest items due at the slot (or paced reminder) within ``lead_minutes``.
 
     Returns how many tasks were checked and how many produced a signal. A provider failure never breaks the tick.
     """
@@ -73,6 +74,9 @@ def refresh_before_digest(store: Any, config: dict[str, Any], now_dt: datetime, 
     if provider is None:
         return counts
     slot = upcoming_slot(now_dt, config, lead_minutes)
+    if slot is None:
+        paced_at = next_reminder_at(store, config, now_dt)
+        slot = max(paced_at, now_dt) if paced_at is not None and paced_at <= now_dt + timedelta(minutes=lead_minutes) else None
     if slot is None:
         return counts
     slot_iso, now = iso(slot), iso(now_dt)

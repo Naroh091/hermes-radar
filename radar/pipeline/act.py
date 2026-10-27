@@ -15,7 +15,7 @@ from .sessions import session_of, task_session_active
 from ..models import TASK_TERMINAL, canonical_hash
 from .attention import resolve
 from .checklists import merge_checklist, template_for
-from .reconcile import reconcile
+from .reconcile import collapse, reconcile
 from .schemas import TASK_KINDS
 
 PROPOSAL_TTL_HOURS = 72
@@ -411,6 +411,7 @@ def apply(
                 "urgency": ("high" if important else "normal") if ask_only else "normal" if disposition == "notify_now" else "low",
                 "options": [{"id": "ok", "label": t(language, "btn_ack")}], "ask": ask_only,
             })
+        candidates = collapse(candidates)  # the same doubt as a check and as an ask is one question
         declined = declined_recently(store, task_id, now_dt)
         superseded_ids: list[str] = []
         if not created:
@@ -434,6 +435,11 @@ def apply(
                 when = slot  # grouped news waits for its summary slot
             if item.get("operation") not in ("check", "inform", "ask") and not needs_consent(config, task, item):
                 item_batch = "auto"  # the assistant's own work: it runs by itself and is never offered as a button
+            if (item.get("operation") == "inform" and item_batch == "now" and not owner_followup
+                    and getattr(store, "last_notice_at", None) and store.last_notice_at(task_id)):
+                # Never a second cold interrupt about one task: a re-raised piece of news or a question the owner
+                # already saw and let lapse waits for the reminder. A first, genuinely urgent one still interrupts.
+                item_batch = "digest"
             deliver_after = iso(when) if when and when > now_dt else ""
             ttl = timedelta(hours=SCHEDULED_TTL_HOURS) if deliver_after else timedelta(hours=PROPOSAL_TTL_HOURS)
             expires_at = iso((when if deliver_after else now_dt) + ttl)

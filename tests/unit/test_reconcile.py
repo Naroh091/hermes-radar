@@ -127,3 +127,53 @@ def test_dedupe_keeps_the_newest_of_each_family(store):
     assert statuses["q"] == "pending" and statuses["d"] == "pending"
     assert withdrawn == 3 and statuses["c"] == "expired" and store.get_proposal("c")["params"]["superseded_by"] == "dedupe"
     assert {statuses[pid] for pid in ("a", "b")} == {"expired"}  # four replies to the same people are one decision, the newest
+
+
+CHECK_TEXT = "¿Es correcto que los bloqueos Casa del 26 y Oficina del 27 impiden asistir a las 10:30 y 10:00 propuestas?"
+ASK_TEXT = "¿Impiden Casa 26 y Oficina 27 asistir a las 10:30 y 10:00?"
+BLOCKS_FACT = {"key": "bloqueos_impiden_26_27", "yes": "impiden", "no": "no_impiden"}
+
+
+def _carlos_plan(**overrides):
+    fields = {"task": {**plan_answer()["task"], "kind": "work_item", "title": "Fin de cesión de Carlos"},
+              "checks": [{"description": CHECK_TEXT, "severity": "warning", "ask_user": True}],
+              "proposals": [_step(ASK_TEXT, operation="ask", fact=BLOCKS_FACT)],
+              "notify": {"disposition": "digest", "urgency": "today", "importance": "normal", "reason": "x"}}
+    return plan_answer(**{**fields, **overrides})
+
+
+def test_a_check_and_an_ask_about_the_same_doubt_are_one_question(store):
+    assert same_family(family({"title": CHECK_TEXT, "operation": "check"}), family({"title": ASK_TEXT, "operation": "ask", "fact": BLOCKS_FACT}))
+    first = _apply(store, config(), _carlos_plan())
+    [question] = store.list_proposals(task_id=first.task_id)
+    assert question["operation_id"] == "ask" and question["params"]["fact"] == BLOCKS_FACT  # the ask stays: its answer records the fact
+
+
+def test_a_replan_never_lets_a_check_rewrite_the_open_ask_nor_keeps_a_check_beside_a_new_ask(store):
+    cfg = config()
+    first = _apply(store, cfg, _carlos_plan(proposals=[]))
+    [check] = store.list_proposals(task_id=first.task_id)
+    assert check["operation_id"] == "check"
+    replan = _carlos_plan(task_match={"decision": "advances", "task_id": first.task_id, "why": "x"})
+    _apply(store, cfg, replan, existing_task=task_context(store, store.get_task(first.task_id)), at=NOW + timedelta(hours=1))
+    rows = {p["id"]: p for p in store.list_proposals(task_id=first.task_id)}
+    assert rows[check["id"]]["status"] == "expired"  # the check gives way to the ask
+    [ask] = [p for p in rows.values() if p["status"] == "pending"]
+    assert ask["operation_id"] == "ask" and ask["params"]["fact"] == BLOCKS_FACT
+    # The next re-plan restates both again: the ask stands untouched and no check comes back.
+    again = _carlos_plan(task_match={"decision": "advances", "task_id": first.task_id, "why": "x"}, proposals=[])
+    _apply(store, cfg, again, existing_task=task_context(store, store.get_task(first.task_id)), at=NOW + timedelta(hours=2))
+    open_rows = [p for p in store.list_proposals(task_id=first.task_id) if p["status"] == "pending"]
+    assert [p["id"] for p in open_rows] == [ask["id"]] and open_rows[0]["params"]["fact"] == BLOCKS_FACT
+
+
+def test_dedupe_keeps_the_ask_over_a_newer_check(store):
+    store.create_task(task_id="t2", kind="work_item", title="Cesión", summary="", entities={}, expectations=[], checklist=[], now=NOW_S)
+    store.create_task_proposal(proposal_id="ask", task_id="t2", title=ASK_TEXT, reason_text="", action_class="read", operation_id="ask",
+                               params={"fact": BLOCKS_FACT}, options=[], urgency="normal", expires_at="2026-10-25T10:00:00Z", fingerprint="ask",
+                               now="2026-10-22T10:00:00Z", batch_key="digest")
+    store.create_task_proposal(proposal_id="check", task_id="t2", title=CHECK_TEXT, reason_text="", action_class="read", operation_id="check",
+                               params={}, options=[], urgency="normal", expires_at="2026-10-25T10:00:00Z", fingerprint="check",
+                               now="2026-10-23T10:00:00Z", batch_key="digest")
+    assert dedupe_open(store, "t2", "2026-10-23T12:00:00Z") == 1
+    assert store.get_proposal("ask")["status"] == "pending" and store.get_proposal("check")["status"] == "expired"

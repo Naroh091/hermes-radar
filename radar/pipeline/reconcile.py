@@ -7,6 +7,10 @@ the owner. Here a candidate that says the same thing as an open step (same famil
 external action, the same piece of work, compared by word stems) updates that step in place, so the number the
 owner already saw keeps pointing at it; an open step the new plan does not restate is withdrawn; a step that is
 already running is never duplicated.
+
+A question is one family whatever its form: on 2026-10-24 a plan carried the same doubt as a check (from its
+verifications) and as an ask (with the fact to record), and the owner would have received it twice in a row. The ask
+wins, because its answer records the fact; a check never rewrites an ask in place.
 """
 from __future__ import annotations
 
@@ -26,17 +30,17 @@ def stems(title: Any) -> frozenset[str]:
 
 
 def family(item: dict[str, Any]) -> Family:
-    """``(kind, exact_key, stems)``: kind is ask | check | inform | external | work; the exact key is the fact an
-    ask records (two questions about the same fact are the same question, whatever their wording)."""
+    """``(kind, exact_key, stems)``: kind is question (ask or check) | inform | external | work; the exact key is the
+    fact an ask records (two questions about the same fact are the same question, whatever their wording)."""
     operation = str(item.get("operation_id") or item.get("operation") or "")
     action_class = str(item.get("action_class") or "read")
     params = item.get("params") if isinstance(item.get("params"), dict) else {}
     fact = item.get("fact") if isinstance(item.get("fact"), dict) else params.get("fact") if isinstance(params.get("fact"), dict) else {}
     title_stems = stems(item.get("title"))
     if operation == "ask":
-        return ("ask", str(fact.get("key") or ""), title_stems)
+        return ("question", str(fact.get("key") or ""), title_stems)
     if operation == "check":
-        return ("check", "", title_stems)
+        return ("question", "", title_stems)
     if operation == "inform":
         return ("inform", "", title_stems)
     if action_class == "external":
@@ -68,6 +72,28 @@ def _score(a: Family, b: Family) -> float:
     return overlap(a[2], b[2])
 
 
+def _operation(item: dict[str, Any]) -> str:
+    return str(item.get("operation_id") or item.get("operation") or "")
+
+
+def _is_ask(item: dict[str, Any]) -> bool:
+    return _operation(item) == "ask"
+
+
+def collapse(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One candidate per family within a plan, in the plan's order; between two forms of the same question the ask
+    stays, in the place of the first."""
+    kept: list[dict[str, Any]] = []
+    for item in candidates:
+        fam = family(item)
+        index = next((i for i, other in enumerate(kept) if same_family(fam, family(other))), None)
+        if index is None:
+            kept.append(item)
+        elif _is_ask(item) and not _is_ask(kept[index]):
+            kept[index] = item
+    return kept
+
+
 def _scheduled_later(row: dict[str, Any], now: str) -> bool:
     when = str((row.get("params") or {}).get("when") or "")
     return bool(when) and when > now
@@ -82,6 +108,7 @@ def reconcile(store: Any, task_id: str, candidates: list[dict[str, Any]], now: s
     (waiting, accepted, executing) is dropped: that work is being done. Steps the planner scheduled for a later
     moment are never withdrawn implicitly.
     """
+    candidates = collapse(candidates)
     rows = store.list_proposals(task_id=task_id, limit=200)
     open_rows = [r for r in rows if r.get("status") in OPEN]
     in_flight = [family(r) for r in rows if r.get("status") in IN_FLIGHT]
@@ -102,6 +129,11 @@ def reconcile(store: Any, task_id: str, candidates: list[dict[str, Any]], now: s
             score = _score(fam, other)
             if score > best_score:
                 best, best_score = row, score
+        if best is not None and _is_ask(best) and not _is_ask(item):
+            taken.add(best["id"])  # the open ask already asks it, and records the answer: it stands as it is
+            continue
+        if best is not None and _is_ask(item) and not _is_ask(best):
+            best = None  # an ask replaces the open check: the check is withdrawn below, the ask is inserted
         entry = dict(item)
         if best is not None:
             taken.add(best["id"])
@@ -112,9 +144,10 @@ def reconcile(store: Any, task_id: str, candidates: list[dict[str, Any]], now: s
 
 
 def dedupe_open(store: Any, task_id: str, now: str) -> int:
-    """Keep one open step per family (the newest) and withdraw the rest. Returns how many were withdrawn."""
+    """Keep one open step per family (the newest; of a question, the newest ask) and withdraw the rest. Returns how
+    many were withdrawn."""
     rows = [r for r in store.list_proposals(task_id=task_id, limit=200) if r.get("status") in OPEN]
-    rows.sort(key=lambda r: (str(r.get("created_at") or ""), str(r.get("id") or "")), reverse=True)
+    rows.sort(key=lambda r: (_is_ask(r), str(r.get("created_at") or ""), str(r.get("id") or "")), reverse=True)
     keepers: list[Family] = []
     withdraw: list[str] = []
     for row in rows:
