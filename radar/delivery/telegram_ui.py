@@ -301,6 +301,15 @@ def command_text(rt: Any, raw_args: str, *, set_trust: Callable[[str], None] | N
             marks = (f" ({len(pending)} ⏳)" if pending else "") + (f" ({len(waiting)} ⏸)" if waiting else "")
             lines.append(f"• [{task['kind']}] {task['title']} — {task['status']}{marks}\n  id: {task['id'][:8]}")
         return "\n".join(lines)
+    if sub == "next":
+        from .preview import deliver_next, format_sent
+
+        try:
+            result = deliver_next(store, rt.config, rt.clock())
+        except Exception:
+            log.exception("radar next delivery failed")
+            raise
+        return format_sent(result, rt.config)
     if sub == "prefs":
         from .learn import list_preferences_text
 

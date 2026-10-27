@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from ..i18n import t
 from ..models import TASK_TERMINAL, canonical_hash
-from .cadence import next_delivery
+from .cadence import next_delivery, next_morning, paced
 from .context import thread_context
 
 OPEN_PROPOSAL = ("pending", "sent", "snoozed")
@@ -87,12 +87,14 @@ def iso(value: datetime) -> str:
 
 
 def snooze_until(now_dt: datetime, config: dict[str, Any]) -> datetime:
-    """"Remind me tomorrow" means the first summary slot of the next day; without slots, 24 hours."""
+    """"Remind me tomorrow" means the start of the next waking day (paced) or the first summary slot of the next day."""
+    if paced(config):
+        return next_morning(now_dt, config)
     return next_delivery(now_dt, "whenever", config) or (now_dt + timedelta(hours=SNOOZE_HOURS))
 
 
 def snoozed_text(language: str, now_dt: datetime, until: datetime, config: dict[str, Any], title: str) -> str:
-    if next_delivery(now_dt, "whenever", config) is None:
+    if not paced(config) and next_delivery(now_dt, "whenever", config) is None:
         return t(language, "snoozed", hours=SNOOZE_HOURS, title=title)
     local_now, local_until = now_dt.astimezone(until.tzinfo), until
     clock = local_until.strftime("%H:%M")

@@ -51,7 +51,7 @@ def _crowd(store):
     _proposal(store, "d-ies2", "ies", "¿Precisamos la exclusividad de 24 meses?", urgency="low")
     _proposal(store, "w-1", "yahoo", "Localizar el feed de Yahoo y comparar fotos", operation="investigate", options=[])
     _proposal(store, "w-2", "php", "Comprobar versiones parcheadas de PHP", operation="web.read", options=[])
-    _proposal(store, "w-3", "ies", "Preparar borrador para Arturo", operation="gmail.create_draft", action_class="local", options=[])
+    _proposal(store, "w-3", "ies", "Preparar el resumen del acuerdo para Arturo", operation="file.write_report", action_class="local", options=[])
     _proposal(store, "n-yahoo", "yahoo", "El PR #2041 ya está verde en master", operation="inform", params={"message": "El PR #2041 con el arreglo de las fotos ya está verde en master."}, options=[])
     _proposal(store, "n-ws", "ws", "La tarjeta de Ramón quedó como principal", operation="inform", params={"message": "Anais confirma que la tarjeta de Ramón quedó como principal."}, options=[])
 
@@ -121,6 +121,19 @@ def test_the_item_carries_the_task_facts_so_the_model_can_place_it(store):
     assert "never by reflex" in REMIND_PROMPT and "vary the opening" not in REMIND_PROMPT
 
 
+def test_hold_for_cooldown_holds_an_unanswered_task_within_its_window():
+    from datetime import timedelta
+
+    from radar.delivery.dispatch import _hold_for_cooldown
+    reminded = {"tun": NOW - timedelta(minutes=30)}
+    day = timedelta(hours=24)
+    assert _hold_for_cooldown("tun", {"tun"}, reminded, NOW, day) is True                 # owed + reminded 30 min ago: held
+    assert _hold_for_cooldown("tun", set(), reminded, NOW, day) is False                   # answered (not awaiting): flows
+    assert _hold_for_cooldown("tun", {"tun"}, reminded, NOW + timedelta(hours=25), day) is False  # cooldown passed: nudges
+    assert _hold_for_cooldown("other", {"other"}, reminded, NOW, day) is False             # never reminded
+    assert _hold_for_cooldown("tun", {"tun"}, reminded, NOW, timedelta(0)) is False        # cooldown off
+
+
 def test_the_scheduler_composes_the_reminder_with_the_model(store, tmp_path):
     cfg = active_config()
     verify_destination(store)
@@ -186,5 +199,9 @@ def test_work_is_the_assistants_own_whatever_the_wording_and_the_owner_decides_o
     assert not needs_consent({**balanced, "observation": {**balanced["observation"], "session_auto_jobs": True}}, from_chat, read)
     assert needs_consent(balanced, plain, {"operation_id": "cron.create", "action_class": "local", "params": {}})  # automations are always the owner's call
     assert needs_consent(balanced, plain, {"operation_id": "gmail.reply", "action_class": "external", "params": {}})
+    # Email is always the owner's call, whatever the trust level and whatever auto_external lists: never auto.
+    autonomous = active_config(trust={"level": "autonomous", "overrides": {}, "auto_external": ["gmail.reply", "gmail.create_draft"]})
+    assert needs_consent(autonomous, plain, {"operation_id": "gmail.reply", "action_class": "external", "params": {}})
+    assert needs_consent(autonomous, plain, {"operation_id": "gmail.create_draft", "action_class": "external", "params": {}})
     assert needs_consent(balanced, plain, {"operation_id": "inform", "action_class": "read", "params": {"ask": True}})
     assert not needs_consent(balanced, plain, {"operation_id": "inform", "action_class": "read", "params": {}})

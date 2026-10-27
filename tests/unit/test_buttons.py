@@ -103,8 +103,8 @@ def test_task_buttons_say_when_they_come_back(store):
     assert later["text"] == "Te lo recuerdo mañana a las 09:00: Decidir el alcance"
     assert store.get_task("t1")["snoozed_until"] == "2026-10-20T07:00:00Z" and store.get_proposal("p1")["snoozed_until"] == "2026-10-20T07:00:00Z"
     assert store.wake_snoozed_proposals("2026-10-20T07:00:00Z") == 1
-    plain = active_config(notifications={"digest_times": []})
-    assert act_on_task(store, plain, task_id="t1", action="later", actor="telegram:7", now_dt=NOW)["text"].startswith("Te lo recuerdo en 24 h")
+    paced = active_config(notifications={"digest_times": [], "quiet_start": "22:00", "quiet_end": "08:00"})
+    assert act_on_task(store, paced, task_id="t1", action="later", actor="telegram:7", now_dt=NOW)["text"] == "Te lo recuerdo mañana a las 08:00: Decidir el alcance"
     done = act_on_task(store, cfg, task_id="t1", action="done", actor="telegram:7", now_dt=NOW)
     assert done["text"] == "Marcado como resuelto: Decidir el alcance" and store.get_task("t1")["status"] == "done"
 

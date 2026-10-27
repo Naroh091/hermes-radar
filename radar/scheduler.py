@@ -327,15 +327,31 @@ class Scheduler:
             return 0
 
     async def _run_jobs(self, now_dt: datetime) -> dict[str, int]:
+        from .jobs.service import release_orphans, settle_lost_job
+
         now = iso(now_dt)
-        recovered = self.store.recover_stale_jobs(now)
+        jobs_cfg = self.config.get("jobs", {})
+        longest = max(int(jobs_cfg.get("max_seconds", 300)), int(jobs_cfg.get("investigate_seconds", 900)))
+        lease = iso(now_dt + timedelta(seconds=longest + 300))  # covers an investigation plus a clone
+        alive = {task.get_name().removeprefix("radar:job:") for task in self.runtime.job_tasks}
+        recovered = 0
+        for job in self.store.expired_job_leases(now):
+            if job["id"] in alive:  # still working: a lease that runs out must not lose its result
+                self.store.extend_job_lease(job["id"], fencing_token=job["fencing_token"], lease_until=lease, now=now)
+                continue
+            try:
+                settle_lost_job(self.store, self.config, job=job, now_dt=now_dt)
+                recovered += 1
+            except Exception as exc:
+                log.warning("radar lost job %s not settled: %s", job["id"], exc)
+        try:
+            recovered += release_orphans(self.store, self.config, now_dt)
+        except Exception as exc:
+            log.warning("radar orphaned steps not released: %s", exc)
         started = 0
-        max_concurrent = int(self.config.get("jobs", {}).get("max_concurrent", 2))
+        max_concurrent = int(jobs_cfg.get("max_concurrent", 2))
         free = max(0, max_concurrent - len(self.runtime.job_tasks))
         if free:
-            jobs_cfg = self.config.get("jobs", {})
-            longest = max(int(jobs_cfg.get("max_seconds", 300)), int(jobs_cfg.get("investigate_seconds", 900)))
-            lease = iso(now_dt + timedelta(seconds=longest + 300))  # covers an investigation plus a clone
             for job in self.store.claim_queued_jobs(now, lease, free):
                 if self.runtime.spawn_job(job) is not None:
                     started += 1

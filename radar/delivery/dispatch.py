@@ -11,7 +11,7 @@ import logging
 from ..i18n import t
 from ..models import TASK_TERMINAL, canonical_hash
 from ..trust import needs_consent
-from .cadence import _tz, digest_due
+from .cadence import _tz, digest_due, latest_moment, next_paced, paced, reminder_gap, waking_window
 from .context import thread_context
 from .notice import DRAFT_INLINE, TASK_PREFIX, _esc, build_notice, decision_buttons
 from .remind import fallback_text
@@ -94,28 +94,75 @@ def _first_of_day(store: Any, config: dict[str, Any], now_dt: datetime) -> bool:
     return last.astimezone(tz).date() < now_dt.astimezone(tz).date()
 
 
+def _task_reminded_at(store: Any) -> dict[str, datetime]:
+    """When the owner was last sent a reminder (a digest row) about each task."""
+    out: dict[str, datetime] = {}
+    for row in store.list_outbox(limit=200):
+        if row.get("kind") != "digest" or row.get("status") in ("failed", "cancelled", "expired"):
+            continue
+        task_id, at = row.get("task_id"), _parse(row.get("created_at"))
+        if task_id and at and (task_id not in out or at > out[task_id]):
+            out[task_id] = at
+    return out
+
+
+def _hold_for_cooldown(task_id: str, awaiting: set, reminded: dict[str, datetime], now_dt: datetime,
+                       cooldown: timedelta) -> bool:
+    """Hold a new decision when the owner still owes an answer on this task and its last reminder is younger
+    than the cooldown. Once they answer (the task leaves ``awaiting``) or the cooldown passes, it flows."""
+    last = reminded.get(task_id)
+    return bool(cooldown) and task_id in awaiting and last is not None and now_dt - last < cooldown
+
+
 def select_reminder(store: Any, config: dict[str, Any], now_dt: datetime) -> dict[str, Any] | None:
-    """What the next reminder carries, or None when no slot is due or nothing waits: the best-placed decisions
+    """What the next reminder carries, or None when none is due or nothing waits: the best-placed decisions
     (``notifications.reminder_items``, one by default), at most one piece of news, and the counts the text may mention.
+    Paced (the default), a reminder is due at the moment :func:`next_paced` gives, or earlier (once ``reminder_gap_minutes``, if set,
+    have passed since the last message) for a decision that cannot wait for it (see :func:`_pressing`); those go first.
     The assistant's own queued work never appears: it is not the owner's to decide."""
     notifications = config.get("notifications", {})
     if config.get("mode") != "active" or not notifications.get("enabled") or not _destination_ok(store):
         return None
     now = iso(now_dt)
     pending = [p for p in store.list_proposals(statuses=("pending",), limit=200) if p.get("batch_key") == "digest" and _deliverable(p, now)]
-    if not pending or not digest_due(now_dt, _last_digest_at(store), config):
+    if not pending:
         return None
+    is_paced = paced(config)
+    if not is_paced and not digest_due(now_dt, _last_digest_at(store), config):
+        return None
+    # One reminder per task at a time: a task with a question the owner has not answered does not get a second
+    # reminder about a new decision until they answer (then it flows) or reminder_cooldown_hours has passed
+    # (then it may nudge once more). Stops a churning task — several re-plans in an hour, each a variant of the
+    # same thing — from pelting the owner. Real emergencies do not ride here; they interrupt as a "now" notice.
+    sent_decisions = [p for p in store.list_proposals(statuses=("sent",), limit=200) if _decision_like(p)]
+    awaiting = {p.get("task_id") for p in sent_decisions if p.get("task_id")}
+    cooldown = timedelta(hours=float((notifications.get("reminder_cooldown_hours") or 0)))
+    reminded = _task_reminded_at(store) if cooldown else {}
     decisions: list[tuple[dict[str, Any], dict[str, Any]]] = []
     news: list[tuple[dict[str, Any], dict[str, Any]]] = []
     for task, items in _group_by_task(store, pending):
         for proposal in items:
             if needs_consent(config, task, proposal):
+                if _hold_for_cooldown(task["id"], awaiting, reminded, now_dt, cooldown):
+                    continue
                 decisions.append((task, proposal))
             elif proposal.get("operation_id") == "inform":
                 news.append((task, proposal))
     if not decisions and not news:
         return None
-    decisions.sort(key=lambda pair: _rank_key(*pair))
+    if is_paced:
+        regular = next_reminder_at(store, config, now_dt, waiting=len(decisions) or 1)
+        if regular is None:
+            return None
+        pressing = {proposal["id"]: moment for task, proposal in decisions
+                    if (moment := _pressing(task, proposal, config, now_dt, regular)) is not None}
+        last = _last_contact_at(store)
+        gap = reminder_gap(config)
+        if regular > now_dt and not (pressing and (last is None or last + gap <= now_dt)):
+            return None
+        decisions.sort(key=lambda pair: (pair[1]["id"] not in pressing, pressing.get(pair[1]["id"], now_dt), *_rank_key(*pair)))
+    else:
+        decisions.sort(key=lambda pair: _rank_key(*pair))
     news.sort(key=lambda pair: _rank_key(*pair))
     count = max(1, int(notifications.get("reminder_items", 1) or 1))
     chosen = decisions[:count]
@@ -125,11 +172,71 @@ def select_reminder(store: Any, config: dict[str, Any], now_dt: datetime) -> dic
     else:
         chosen_news = news[:1]
         items = [{"task": chosen_news[0][0], "decision": None, "news": [chosen_news[0][1]]}]
-    unanswered = [p for p in store.list_proposals(statuses=("sent",), limit=200) if _decision_like(p)]
     return {
         "items": items, "decisions": [proposal for _, proposal in chosen], "news": [proposal for _, proposal in chosen_news],
-        "backlog": len(decisions) - len(chosen) + len(unanswered), "first_of_day": _first_of_day(store, config, now_dt),
+        "backlog": len(decisions) - len(chosen) + len(sent_decisions), "first_of_day": _first_of_day(store, config, now_dt),
     }
+
+
+def next_reminder_at(store: Any, config: dict[str, Any], now_dt: datetime, *, waiting: int | None = None) -> datetime | None:
+    """When the next regular paced reminder is due (None with fixed slots). ``waiting`` defaults to the decisions
+    pending for a reminder."""
+    if not paced(config):
+        return None
+    if waiting is None:
+        now = iso(now_dt)
+        rows = [p for p in store.list_proposals(statuses=("pending",), limit=200) if p.get("batch_key") == "digest" and _deliverable(p, now)]
+        waiting = sum(1 for task, items in _group_by_task(store, rows) for p in items if needs_consent(config, task, p)) or (1 if rows else 0)
+    start, _ = waking_window(now_dt, config)
+    return next_paced(now_dt, config, last_contact=_last_contact_at(store), reminders_in_window=_reminders_since(store, start),
+                      waiting=waiting)
+
+
+def _deadline(task: dict[str, Any], proposal: dict[str, Any], config: dict[str, Any], now_dt: datetime) -> datetime | None:
+    """The moment after which the decision is of no use: the task's ``due_at``, or, for a plan urgency of ``today``,
+    the end of the waking day the step was proposed in, whichever comes first."""
+    moments = []
+    due = _parse(task.get("due_at"))
+    if due is not None:
+        moments.append(due)
+    created = _parse(proposal.get("created_at"))
+    if str((proposal.get("params") or {}).get("urgency") or "") == "today" and created is not None:
+        moments.append(waking_window(created, config)[1])
+    return min(moments) if moments else None
+
+
+def _pressing(task: dict[str, Any], proposal: dict[str, Any], config: dict[str, Any], now_dt: datetime, regular: datetime) -> datetime | None:
+    """The moment by which this decision has to reach the owner when the next regular reminder would be too late
+    (or now, for a step of high urgency); None when it can wait its turn. A deadline already past presses no more."""
+    if proposal.get("urgency") == "high":
+        return now_dt
+    deadline = _deadline(task, proposal, config, now_dt)
+    if deadline is None or deadline <= now_dt:
+        return None
+    moment = latest_moment(deadline, config)
+    return moment if moment <= regular else None
+
+
+def _parse(value: Any) -> datetime | None:
+    try:
+        moment = datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
+
+
+def _last_contact_at(store: Any) -> datetime | None:
+    """When the owner last got a message from Radar (a notice or a reminder, queued or sent)."""
+    for row in store.list_outbox(limit=50):
+        if row.get("kind") in ("notice", "digest") and row.get("status") not in ("failed", "cancelled", "expired"):
+            return _parse(row.get("created_at"))
+    return None
+
+
+def _reminders_since(store: Any, start: datetime) -> int:
+    since = iso(start)
+    return sum(1 for row in store.list_outbox(limit=200)
+               if row.get("kind") == "digest" and row.get("status") not in ("failed", "cancelled", "expired") and str(row.get("created_at") or "") >= since)
 
 
 def build_reminder(selection: dict[str, Any], text: str, *, language: str) -> dict[str, Any]:
