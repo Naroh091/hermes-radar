@@ -15,10 +15,11 @@ READ_OPERATIONS = frozenset({
     "session.search", "investigate",
 })
 LOCAL_OPERATIONS = frozenset({
-    "git.create_branch", "github.open_pr", "gmail.create_draft", "cron.create", "file.write_report",
+    "git.create_branch", "github.open_pr", "cron.create", "file.write_report",
     "task.update", "task.add_evidence", "calendar.draft",
 })
 EXTERNAL_OPERATIONS = frozenset({
+    "gmail.create_draft",  # a draft staged in the owner's mailbox is one tool-call from being sent: always the owner's call
     "gmail.send_email", "gmail.reply", "gmail.reply_all", "gmail.send_reply", "gmail.archive", "gmail.mark",
     "gmail.filter", "gmail.delete", "gmail.modify", "github.merge_pr", "github.close_pr", "github.comment",
     "deploy.run", "db.write", "db.delete", "mailbox.write", "mailbox.delete", "payments.charge",

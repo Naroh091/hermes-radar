@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import timedelta
+from types import SimpleNamespace
 
 from conftest import NOW, config
 
 from radar.jobs.runner import JobOutcome, JobRunner, build_argv, extract_final_json, parse_stream
-from radar.jobs.service import enqueue_job_for_proposal, job_block_reason, record_job_outcome
+from radar.jobs.service import enqueue_job_for_proposal, job_block_reason, record_job_outcome, release_orphans
+from radar.scheduler import Scheduler
 from radar.trust import may_auto_run
 from radar.reversibility import classify, validate_no_automerge
 
@@ -69,9 +72,11 @@ def test_trust_and_reversibility_rules():
     assert may_auto_run(balanced, "read") and may_auto_run(balanced, "local") and not may_auto_run(balanced, "external", operation_id="gmail.send_email")
     cautious = {"level": "cautious", "overrides": {"work_item": {"local": "auto"}}, "auto_external": []}
     assert not may_auto_run(cautious, "local") and may_auto_run(cautious, "local", kind="work_item")
-    autonomous = {"level": "autonomous", "overrides": {}, "auto_external": ["gmail.reply"]}
-    assert may_auto_run(autonomous, "external", operation_id="gmail.reply") and not may_auto_run(autonomous, "external", operation_id="payments.charge")
-    assert classify("github.open_pr") == "local" and classify("gmail.send_email") == "external" and classify("whatever") == "external"
+    autonomous = {"level": "autonomous", "overrides": {}, "auto_external": ["gmail.reply", "github.comment"]}
+    assert may_auto_run(autonomous, "external", operation_id="github.comment")  # a listed non-email external runs unattended
+    assert not may_auto_run(autonomous, "external", operation_id="gmail.reply")  # email never auto, whatever auto_external lists
+    assert not may_auto_run(autonomous, "external", operation_id="payments.charge")
+    assert classify("github.open_pr") == "local" and classify("gmail.send_email") == "external" and classify("gmail.create_draft") == "external" and classify("whatever") == "external"
     try:
         validate_no_automerge("github.open_pr", {"auto_merge": True})
         assert False
@@ -198,20 +203,21 @@ def test_job_cancelled_by_a_restart_requeues_its_step_instead_of_failing(store):
     assert store.get_job(claimed["id"])["status"] == "cancelled" and store.list_signals(kind="job_result") == []
 
 
-def test_autonomous_trust_runs_listed_external_operations_unattended(store):
-    cfg = config(trust={"level": "autonomous", "overrides": {}, "auto_external": ["gmail.reply"]})
+def test_autonomous_runs_listed_externals_unattended_but_never_email(store):
+    cfg = config(trust={"level": "autonomous", "overrides": {}, "auto_external": ["gmail.reply", "github.comment"]})
     now = "2026-10-19T10:00:00Z"
     store.create_task(task_id="t1", kind="work_item", title="Bug", summary="", entities={}, expectations=[], checklist=[], now=now)
-    for pid, operation in (("reply", "gmail.reply"), ("deploy", "deploy.run"), ("other", "github.comment")):
+    for pid, operation in (("reply", "gmail.reply"), ("deploy", "deploy.run"), ("comment", "github.comment")):
         store.create_task_proposal(proposal_id=pid, task_id="t1", title=f"Paso {pid}", reason_text="", action_class="external", operation_id=operation,
                                    params={}, options=[], urgency="normal", expires_at="2026-10-22T10:00:00Z", fingerprint=pid, now=now)
-    reason = lambda pid: job_block_reason(store, cfg, proposal=store.get_proposal(pid), now_dt=NOW, auto=True)  # noqa: E731
-    assert reason("reply") is None  # listed in auto_external
+    reason = lambda pid, nat=True: job_block_reason(store, cfg, proposal=store.get_proposal(pid), now_dt=NOW, auto=True, is_native=nat)  # noqa: E731
+    assert reason("reply") == "external_auto"  # email never runs unattended, even listed in auto_external
     assert reason("deploy") == "external_auto"  # never unattended
-    assert reason("other") == "external_auto"  # not listed
-    store.respond_proposal("reply", decision="accepted", response={"option": "do", "auto": True}, now=now)
-    job = enqueue_job_for_proposal(store, cfg, proposal=store.get_proposal("reply"), option="do", now_dt=NOW, auto=True)
-    assert job is not None and job["action_class"] == "external" and "exactly one external action" in job["prompt"]
+    assert reason("comment") is None  # a listed non-email external still runs unattended
+    # And email with no native handler (a draft) can never fall back to a free-form agent that could send:
+    store.create_task_proposal(proposal_id="draft", task_id="t1", title="Borrador", reason_text="", action_class="external", operation_id="gmail.create_draft",
+                               params={}, options=[], urgency="normal", expires_at="2026-10-22T10:00:00Z", fingerprint="draft", now=now)
+    assert job_block_reason(store, cfg, proposal=store.get_proposal("draft"), now_dt=NOW, auto=False, is_native=False) == "no_safe_executor"
 
 
 def test_final_json_survives_fences_and_stripped_braces():
@@ -232,3 +238,54 @@ def test_job_prompt_carries_the_approved_draft_verbatim():
                               workdir=None, grant={"option": "do_it", "label": "Enviar borrador", "at": "2026-10-19T10:00:00Z", "actor": "telegram:7", "channel": "telegram"})
     assert "APPROVED DRAFT" in prompt and "Could you send screenshots?" in prompt and "Draft reference: Draft ID: r123" in prompt
     assert "send that draft" in prompt and "```json" in prompt
+
+
+def _running_step(store, cfg, now="2026-10-19T10:00:00Z", lease="2026-10-19T10:07:00Z", auto=True):
+    try:
+        store.get_task("t1")
+    except KeyError:
+        store.create_task(task_id="t1", kind="work_item", title="Bug", summary="", entities={}, expectations=[], checklist=[], now=now)
+        store.create_task_proposal(proposal_id="p1", task_id="t1", title="Investigar", reason_text="", action_class="read", operation_id="investigate",
+                                   params={}, options=[], urgency="normal", expires_at="2026-10-22T10:00:00Z", fingerprint="fp", now=now)
+        store.respond_proposal("p1", decision="accepted", response={"option": "do", "auto": True}, now=now)
+    assert enqueue_job_for_proposal(store, cfg, proposal=store.get_proposal("p1"), option="do", now_dt=NOW, auto=auto)
+    return store.claim_queued_jobs(now, lease, 1)[0]
+
+
+def _scheduler(store, cfg, at, alive=()):
+    runtime = SimpleNamespace(job_tasks=[SimpleNamespace(get_name=lambda job_id=job_id: f"radar:job:{job_id}") for job_id in alive],
+                              spawn_job=lambda job: None)
+    return Scheduler(store, cfg, worker_id="w", clock=lambda: at, runtime=runtime)
+
+
+def test_a_job_whose_lease_runs_out_keeps_it_while_it_runs_and_is_retried_once_when_lost(store):
+    cfg = config()
+    job = _running_step(store, cfg)
+    later = NOW + timedelta(minutes=10)
+    asyncio.run(_scheduler(store, cfg, later, alive=[job["id"]])._run_jobs(later))
+    assert store.get_job(job["id"])["status"] == "running" and store.get_job(job["id"])["lease_until"] > "2026-10-19T10:10:00Z"
+    # The gateway died under it: nobody runs it any more. Its step waits to start again, without a result signal.
+    much_later = NOW + timedelta(hours=1)
+    assert asyncio.run(_scheduler(store, cfg, much_later)._run_jobs(much_later))["recovered"] == 1
+    assert store.get_job(job["id"])["status"] == "cancelled" and store.get_job(job["id"])["error"] == "lease expired"
+    assert store.get_proposal("p1")["status"] == "waiting" and store.list_signals(kind="job_result") == []
+    # Lost a second time: the step ends unknown and the task re-plans from the result signal.
+    store.set_proposal_status("p1", "accepted", "2026-10-19T11:00:00Z")
+    again = _running_step(store, cfg, now="2026-10-19T11:00:00Z", lease="2026-10-19T11:07:00Z", auto=False)  # past the auto cooldown
+    end = NOW + timedelta(hours=2)
+    asyncio.run(_scheduler(store, cfg, end)._run_jobs(end))
+    assert store.get_job(again["id"])["status"] == "unknown" and store.get_proposal("p1")["status"] == "unknown"
+    assert [s["meta"]["status"] for s in store.list_signals(kind="job_result")] == ["unknown"]
+
+
+def test_a_step_left_executing_by_a_lost_job_is_released(store):
+    cfg = config()
+    job = _running_step(store, cfg)
+    # Before 2026-10-25 the lost job was closed and its step forgotten, executing for good.
+    store.finish_job(job["id"], fencing_token=job["fencing_token"], status="unknown", summary=None, result={}, usage={}, error="lease expired",
+                     now="2026-10-19T10:08:00Z")
+    assert store.get_proposal("p1")["status"] == "executing"
+    assert release_orphans(store, cfg, NOW + timedelta(days=2)) == 1
+    proposal = store.get_proposal("p1")
+    assert proposal["status"] == "waiting" and proposal["params"]["wait_reason"] == "interrupted"
+    assert release_orphans(store, cfg, NOW + timedelta(days=2)) == 0

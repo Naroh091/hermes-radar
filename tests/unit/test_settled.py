@@ -86,6 +86,26 @@ def test_a_decision_with_no_step_still_reaches_the_owner(store):
     assert dispatch(store, cfg, NOW)["notices"] == 1
 
 
+def test_a_second_interrupt_about_one_task_waits_for_the_reminder(store):
+    cfg = active_config()
+    verify_destination(store)
+    # The owner was already interrupted about this task once and let the question lapse (the efcsn-prod case).
+    store.create_task(task_id="efcsn", kind="check", title="Vulnerabilidad en efcsn-prod-2026", summary="", entities={}, expectations=[], checklist=[], now="2026-10-18T19:34:00Z")
+    store.enqueue_notification(outbox_id="o-first", destination_id="configured:primary", followup_id=None, proposal_id=None, notification_key="notice:efcsn",
+                               payload={"text": "¿Gestionáis el servidor efcsn-prod-2026?", "parse_mode": None, "buttons": [], "proposal_ids": [], "kind": "notice"},
+                               now="2026-10-18T19:34:00Z", task_id="efcsn", kind="notice")
+    task = store.get_task("efcsn")
+    replan = plan_answer(task={**plan_answer()["task"], "id": "efcsn", "kind": "check", "title": "Vulnerabilidad en efcsn-prod-2026", "status": "needs_user"},
+                         proposals=[], checks=[], escalation={"decision": "ask", "why": "only the owner knows"},
+                         message="Queda pendiente confirmar si gestionas el servidor efcsn-prod-2026 para los tickets de Linode.",
+                         notify={"disposition": "notify_now", "urgency": "now", "importance": "high", "reason": "x"})
+    result = _apply(store, cfg, replan, extract=extract_answer(category="check"), existing_task=task)
+    [item] = store.list_proposals(task_id=result.task_id)
+    assert item["operation_id"] == "inform" and item["params"]["ask"] is True  # a decision answered in words
+    assert item["batch_key"] == "digest"  # already interrupted once: the re-raised question waits for the reminder, not a 2nd now-notice
+    assert dispatch(store, cfg, NOW)["notices"] == 0
+
+
 def test_a_merge_turns_the_pending_ask_into_one_line_of_news(store):
     cfg = active_config()
     verify_destination(store)
@@ -178,7 +198,7 @@ def test_summary_slots_no_longer_hold_back_automatic_steps(store, tmp_path):
     cfg = active_config(trust={"level": "autonomous", "overrides": {}, "auto_external": []})
     verify_destination(store)
     plan = plan_answer(task={**plan_answer()["task"], "kind": "work_item", "title": "Revisar el PR #87"},
-                       proposals=[{"title": "Preparar comentario de revisión", "rationale": "", "action_class": "local", "operation": "gmail.create_draft",
+                       proposals=[{"title": "Preparar informe de revisión", "rationale": "", "action_class": "local", "operation": "file.write_report",
                                    "when": "", "urgency": "normal", "options": []}],
                        checks=[], notify={"disposition": "digest", "urgency": "this_week", "importance": "normal", "reason": "x"})
     result = _apply(store, cfg, plan, extract=extract_answer(category="work_item"))

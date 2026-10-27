@@ -16,6 +16,10 @@ _AUTO_BY_LEVEL = {
 }
 NEVER_AUTO = frozenset({"payments.charge", "booking.reserve", "deploy.run", "github.merge_pr"})
 ASK_FIRST = frozenset({"cron.create", "task.update"})  # reversible, but automations and closing the owner's tasks are always their call
+# Mail that leaves the mailbox or stages a message to send is always the owner's decision, whatever the trust
+# level and whatever is listed in trust.auto_external: a message to a third party, or a draft of one sitting in
+# the mailbox, is never the assistant's own work and never runs by itself.
+EMAIL_SEND = frozenset({"gmail.send_email", "gmail.reply", "gmail.reply_all", "gmail.send_reply", "gmail.create_draft"})
 
 
 def needs_consent(config: dict[str, Any], task: dict[str, Any] | None, proposal: dict[str, Any]) -> bool:
@@ -29,6 +33,8 @@ def needs_consent(config: dict[str, Any], task: dict[str, Any] | None, proposal:
         return True
     if operation == "inform":
         return bool(params.get("ask") or proposal.get("ask"))
+    if operation in EMAIL_SEND:
+        return True  # email to a third party, or a draft of one, is always the owner's call
     kind = (task or {}).get("kind")
     trust = config.get("trust") or {}
     if action_class == "external":
@@ -57,6 +63,8 @@ def may_auto_run(trust: dict[str, Any], action_class: str, *, kind: str | None =
             auto.discard(action_class)
     if operation_id and operation_id in ASK_FIRST:
         return False
+    if operation_id and operation_id in EMAIL_SEND:
+        return False  # email never runs unattended, whatever trust.auto_external lists
     if action_class == "external":
         if operation_id and operation_id in NEVER_AUTO:
             return False
@@ -77,13 +85,13 @@ GUIDE: dict[str, dict[str, Any]] = {
         "levels": {
             "cautious": "cautious — Solo mira. Corre solo lo de clase read; cualquier cambio, aunque sea un borrador, te pregunta antes.",
             "balanced": "balanced — Mira y prepara. Corre solo read y local; todo lo externo te pregunta siempre. (Recomendado.)",
-            "autonomous": "autonomous — Mira, prepara y actúa. Como balanced, y además ejecuta sin preguntar las operaciones externas que listes en trust.auto_external (p. ej. gmail.reply). Pagar, reservar, desplegar y mergear nunca corren solos.",
+            "autonomous": "autonomous — Mira, prepara y actúa. Como balanced, y además ejecuta sin preguntar las operaciones externas que listes en trust.auto_external. Enviar correo y dejar borradores te pregunta SIEMPRE, sea cual sea el nivel; pagar, reservar, desplegar y mergear nunca corren solos.",
         },
         "examples": (
             "Ejemplo 1 — llega un email de un cliente con un bug de login en tu repo:\n"
             "  cautious   te avisa con lo que se ve en el email y pregunta «¿Investigo?». Solo tras tu sí reproduce el bug.\n"
-            "  balanced   reproduce el bug, crea una rama y un PR en borrador, y te avisa con el resumen, el PR y un borrador de respuesta. Enviar la respuesta te lo pregunta.\n"
-            "  autonomous con auto_external: [gmail.reply], además envía la respuesta al cliente. Mergear o desplegar sigue pidiendo confirmación.\n"
+            "  balanced   reproduce el bug, crea una rama y un PR en borrador, y te avisa con el resumen y el PR. Responder al cliente te lo pregunta siempre.\n"
+            "  autonomous igual que balanced, y además corre sin preguntar las externas que listes en auto_external. Enviar el correo al cliente te lo sigue preguntando: el correo nunca se automatiza. Mergear o desplegar también piden confirmación.\n"
             "Ejemplo 2 — llega la confirmación de un vuelo y no hay hotel para esas noches:\n"
             "  cautious   avisa «falta alojamiento» y pregunta «¿busco opciones?».\n"
             "  balanced   busca opciones solo y te manda tres candidatos con precio. Reservar te lo pregunta.\n"
@@ -102,13 +110,13 @@ GUIDE: dict[str, dict[str, Any]] = {
         "levels": {
             "cautious": "cautious — Looks only. Runs read steps alone; any change, even a draft, asks first.",
             "balanced": "balanced — Looks and prepares. Runs read and local alone; everything external always asks. (Recommended.)",
-            "autonomous": "autonomous — Looks, prepares and acts. Like balanced, plus the external operations you list in trust.auto_external (e.g. gmail.reply) run without asking. Paying, booking, deploying and merging never run alone.",
+            "autonomous": "autonomous — Looks, prepares and acts. Like balanced, plus the external operations you list in trust.auto_external run without asking. Sending email and staging drafts ALWAYS asks, at every level; paying, booking, deploying and merging never run alone.",
         },
         "examples": (
             "Example 1 — a customer emails a login bug in your repo:\n"
             "  cautious   notifies you with what the email shows and asks “Shall I investigate?”. Only after your yes does it reproduce the bug.\n"
-            "  balanced   reproduces the bug, creates a branch and a draft PR, and notifies you with the summary, the PR and a draft reply. Sending the reply asks you.\n"
-            "  autonomous with auto_external: [gmail.reply], it also sends the reply. Merging or deploying still asks.\n"
+            "  balanced   reproduces the bug, creates a branch and a draft PR, and notifies you with the summary and the PR. Replying to the customer always asks you.\n"
+            "  autonomous same as balanced, plus the externals you list in auto_external run without asking. Sending the reply to the customer still asks: email is never automated. Merging or deploying also ask.\n"
             "Example 2 — a flight confirmation arrives and there is no hotel for those nights:\n"
             "  cautious   says “lodging missing” and asks “shall I look for options?”.\n"
             "  balanced   searches on its own and sends you three candidates with prices. Booking asks you.\n"

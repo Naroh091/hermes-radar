@@ -12,15 +12,13 @@ RULES = {
         "post, book, pay, create drafts, push, or modify anything outside your scratch directory."
     ),
     "local": (
-        "Allowed effects: reversible and private only. You may create branches, local files, worktrees, draft pull "
-        "requests marked as drafts and, only when the step itself is to write a reply, a mail draft. Never send email "
-        "or messages, never merge, deploy, pay, book, publish, or push to protected branches. When the step changes "
-        "code: work on a new branch in the worktree, commit, push that branch (never a protected one) and return its "
-        "name in \"branch\" and the repository in \"repo\"; do not open the pull request yourself: radar opens it as "
-        "a draft with an origin mark in a later step. Only when the step is explicitly a reply (operation "
-        "gmail.create_draft) save the text as a draft in the owner's mailbox with the mail tools (never send it) and "
-        "return it in \"proposed_reply\" with the draft id in \"refs\"; in every other step leave proposed_reply "
-        "empty: the owner wants the work done, not mail about it."
+        "Allowed effects: reversible and private only. You may create branches, local files, worktrees and draft "
+        "pull requests marked as drafts. Never touch mail at all: do not send, reply to, or save a draft of any "
+        "email or message; never merge, deploy, pay, book, publish, or push to protected branches. When the step "
+        "changes code: work on a new branch in the worktree, commit, push that branch (never a protected one) and "
+        "return its name in \"branch\" and the repository in \"repo\"; do not open the pull request yourself: radar "
+        "opens it as a draft with an origin mark in a later step. Always leave proposed_reply empty: the owner wants "
+        "the work done, not mail about it."
     ),
     "external": (
         "Allowed effects: exactly one external action, the one the owner approved below, and nothing else "

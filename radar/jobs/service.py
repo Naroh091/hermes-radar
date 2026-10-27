@@ -8,7 +8,7 @@ from typing import Any
 from uuid import uuid4
 
 from ..models import TASK_TERMINAL
-from ..trust import may_auto_run
+from ..trust import EMAIL_SEND, may_auto_run
 from ..operations import native
 from .prompts import build_job_prompt
 from .runner import JobOutcome
@@ -21,7 +21,7 @@ NATIVE_DESTINATION = "configured:primary"
 # reset at midnight, the owner re-enables jobs): the step waits, it is never handed to the owner as a button.
 DEFER_REASONS = frozenset({"active_job", "cooldown", "budget", "task_cap", "disabled"})
 # Blocks that never clear for this proposal.
-TERMINAL_BLOCKS = frozenset({"check", "no_task", "task_closed", "external_auto"})
+TERMINAL_BLOCKS = frozenset({"check", "no_task", "task_closed", "external_auto", "no_safe_executor"})
 
 
 def iso(value: datetime) -> str:
@@ -68,6 +68,11 @@ def job_block_reason(
         return "disabled"
     if proposal.get("operation_id") in ("check", "inform"):
         return "check"  # nothing to run: a consistency question or a piece of news
+    if proposal.get("operation_id") in EMAIL_SEND and not is_native:
+        # A message to a third party (or a draft of one) runs ONLY through the deterministic native handler,
+        # which performs exactly the approved operation. It never runs as a delegated agent that holds a send
+        # tool and could email on its own — the failure that leaked a reply to a third party on 2026-10-27.
+        return "no_safe_executor"
     task_id = proposal.get("task_id")
     if not task_id:
         return "no_task"
@@ -293,6 +298,44 @@ def record_job_outcome(store: Any, config: dict[str, Any], *, job: dict[str, Any
         job["id"], fencing_token=job["fencing_token"], status=status, summary=outcome.summary or None,
         result=outcome.result or {}, usage=outcome.usage or {}, error=outcome.error, now=now, session_ref=outcome.session_ref,
     )
+    return _settle(store, config, job=job, status=status, outcome=outcome, now_dt=now_dt)
+
+
+LOST_RETRIES = 1  # a job lost once (its lease ran out with nobody running it) starts again; lost twice, the task re-plans
+
+
+def settle_lost_job(store: Any, config: dict[str, Any], *, job: dict[str, Any], now_dt: datetime) -> bool:
+    """Close a running job whose lease ran out and that no task of this process runs (the gateway died under it):
+    the first time its step waits to start again, after that it ends ``unknown`` and the task re-plans."""
+    retry = bool(job.get("proposal_id")) and _attempts(store, job) <= LOST_RETRIES
+    outcome = JobOutcome("cancelled" if retry else "unknown", error="lease expired")
+    return record_job_outcome(store, config, job=job, outcome=outcome, now_dt=now_dt)
+
+
+def release_orphans(store: Any, config: dict[str, Any], now_dt: datetime) -> int:
+    """Steps left ``executing`` with no job queued or running (before 2026-10-25 a lost job never released its step,
+    which stayed executing for good): settled as if their last job had just been lost. Returns how many."""
+    released = 0
+    for proposal in store.list_proposals(statuses=("executing",), limit=200):
+        jobs = [j for j in store.list_jobs(task_id=proposal.get("task_id"), limit=200) if j.get("proposal_id") == proposal["id"]]
+        if not jobs or any(j.get("status") in ("queued", "running") for j in jobs):
+            continue
+        last = max(jobs, key=lambda j: str(j.get("created_at") or ""))
+        retry = len(jobs) <= LOST_RETRIES
+        outcome = JobOutcome("cancelled" if retry else "unknown", error=last.get("error") or "lost")
+        _settle(store, config, job=last, status=outcome.status, outcome=outcome, now_dt=now_dt)
+        released += 1
+    return released
+
+
+def _attempts(store: Any, job: dict[str, Any]) -> int:
+    return sum(1 for j in store.list_jobs(task_id=job.get("task_id"), limit=200) if j.get("proposal_id") == job.get("proposal_id"))
+
+
+def _settle(store: Any, config: dict[str, Any], *, job: dict[str, Any], status: str, outcome: JobOutcome, now_dt: datetime) -> bool:
+    """The step and the pipeline after a job ended: a cancelled job's step waits to start again (no signal); any
+    other end settles the step and emits the ``job_result`` signal."""
+    now = iso(now_dt)
     proposal_id = job.get("proposal_id")
     if status == "cancelled" and proposal_id:
         try:
