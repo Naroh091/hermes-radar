@@ -38,8 +38,11 @@ def triage_signal(signal: dict[str, Any], preferences: list[dict[str, Any]], con
     if kind == "email":
         subject = signal.get("title", "")
         text = f"{subject}\n{signal.get('snippet', '')}"
-        if rules.is_access_notice(text) and not meta.get("thread_reply"):
-            return TriageDecision(False, "access_notification")  # a routine "you signed in" / portal-access notice: nothing to do
+        if not meta.get("thread_reply"):
+            if rules.is_enotification(text):
+                return TriageDecision(False, "e_notification")  # an official e-notification waiting in a sede: the owner collects it himself
+            if rules.is_access_notice(text):
+                return TriageDecision(False, "access_notification")  # a routine "you signed in" / portal-access notice: nothing to do
         transactional = rules.is_transactional(text)
         signals = set(meta.get("automation") or [])
         if rules.subject_is_noise(subject) and not transactional:

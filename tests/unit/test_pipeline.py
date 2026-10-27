@@ -47,6 +47,15 @@ def test_triage_drops_routine_portal_access_notices():
     newsignin["title"] = "New sign-in to your account"
     newsignin["snippet"] = "We noticed a new sign-in from Chrome on Mac."
     assert triage_signal(newsignin, []).keep is False
+    # Official administrative e-notifications: a notice waiting in a sede, the owner collects it himself.
+    enotif = _email(automation=[])
+    enotif["title"] = "Nueva notificación electrónica para DAVID ALEJANDRO FERNANDEZ SANCHO"
+    enotif["snippet"] = "Tiene una nueva notificación electrónica dirigida a usted procedente del Consejo de Transparencia."
+    assert triage_signal(enotif, []).keep is False and triage_signal(enotif, []).reason == "e_notification"
+    platform = _email(automation=[])
+    platform["title"] = "Notificación enviada"
+    platform["snippet"] = "<table>...</table>"
+    assert triage_signal(platform, []).keep is False and triage_signal(platform, []).reason == "e_notification"
     # A real thread about requesting access is not a login notice and still gets through.
     request = _email(automation=[])
     request["title"] = "Necesitamos acceso al backend EFCSN"

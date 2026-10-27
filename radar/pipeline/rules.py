@@ -27,6 +27,14 @@ ACCESS_NOTICE = re.compile(
     r"new sign[\- ]?in|signed in\b|new login\b|you (?:just )?logged in|we (?:noticed|detected) a (?:new )?sign[\- ]?in)",
     re.IGNORECASE,
 )
+# Official administrative e-notifications ("tiene una notificación electrónica pendiente de comparecencia"): the
+# message only says a notice is waiting in a sede; the owner collects those on his own schedule and asked not to
+# be told about them (he was muting them one by one).
+ENOTIFICATION = re.compile(
+    r"(notificaci[oó]n(?:es)? electr[oó]nica|notificaci[oó]n enviada|puesta a disposici[oó]n|"
+    r"pendiente de comparecencia|comparecencia en (?:la )?sede|direcci[oó]n electr[oó]nica habilitada|notific@)",
+    re.IGNORECASE,
+)
 MIN_TURN_CHARS = 15
 TASKY_TURN = re.compile(
     r"\b(busca\w*|compra\w*|reserva\w*|planific\w*|organiz\w*|recu[eé]rda\w*|avisa\w*|prepara\w*|env[ií]a\w*|"
@@ -47,6 +55,10 @@ def is_transactional(text: str) -> bool:
 
 def is_access_notice(text: str) -> bool:
     return bool(ACCESS_NOTICE.search(text or ""))
+
+
+def is_enotification(text: str) -> bool:
+    return bool(ENOTIFICATION.search(text or ""))
 
 
 def is_tasky_turn(text: str) -> bool:
