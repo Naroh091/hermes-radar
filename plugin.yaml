@@ -30,15 +30,17 @@ config_schema:
   context: {type: dict, default: {}, description: "Recalled context for planning: memory (the host's memory provider, through its own recall tool), sessions (host session_search), timeout_seconds, max_chars, session_results, memory_tool (pin a tool name)"}
   scheduler: {type: dict, default: {}, description: Own ticker}
   notices_per_day: {type: int, default: 8, label: Notices per day, description: "Daily cap of automatic Telegram notices. Results of steps you approved with a button are always delivered."}
+  reminders_per_day: {type: int, default: 20, label: Reminders per day, description: "Most reminders in a day. They are spread over your waking hours, one per decision waiting; one with a deadline near goes out early."}
+  reminder_gap_minutes: {type: int, default: 0, label: Minimum minutes between messages, description: "0 = no minimum: the reminders follow the even spread over the day."}
   quiet_start: {type: str, default: "22:00", label: Quiet hours start, description: "HH:MM in your timezone. Non-urgent notices wait until quiet hours end."}
   quiet_end: {type: str, default: "08:00", label: Quiet hours end, description: "HH:MM in your timezone."}
-  notifications: {type: dict, default: {}, description: "Advanced: notices to the owner (enabled, digest_times, batch_minutes, reminder_cooldown_hours)"}
+  notifications: {type: dict, default: {}, description: "Advanced: notices to the owner (enabled, digest_times for fixed slots, reminder_lead_minutes, reminder_items, unanswered_hours)"}
   limits: {type: dict, default: {}, description: Daily budgets}
   retention: {type: dict, default: {}, description: Retention of snippets, content and audit}
   sources: {type: list, default: [], description: Enabled sources (gmail, calendar, github, http_status)}
   allowed_operations: {type: list, default: [], description: Allowed read operations for monitors}
   mutations: {type: dict, default: {}, description: External changes stay disabled by default}
-  trust_level: {type: str, choices: [cautious, balanced, autonomous], default: balanced, label: Trust level, description: "cautious only looks (read steps run alone, any change asks first). balanced looks and prepares (read and local steps such as drafts, branches and draft PRs run alone; external actions always ask). autonomous also runs the external operations listed in trust.auto_external; paying, booking, deploying and merging never run alone."}
+  trust_level: {type: str, choices: [cautious, balanced, autonomous], default: balanced, label: Trust level, description: "cautious only looks (read steps run alone, any change asks first). balanced looks and prepares (read and local steps such as branches and draft PRs run alone; external actions always ask). autonomous also runs the external operations listed in trust.auto_external; sending email always asks at every level, and paying, booking, deploying and merging never run alone."}
   trust: {type: dict, default: {}, description: "Advanced: per-kind overrides ({work_item: {local: auto}}) and auto_external operations"}
   ingress: {type: dict, default: {}, description: Gmail push receiver}
   jobs_per_day: {type: int, default: 100, label: Jobs per day, description: "Daily budget of delegated hermes chat jobs (investigations, drafts, approved actions). Steps that find it spent wait for the next day."}

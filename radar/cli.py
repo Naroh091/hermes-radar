@@ -57,6 +57,8 @@ def setup_cli(parser: argparse.ArgumentParser) -> None:
     imp.add_argument("what", choices=["mail-intelligence"])
     imp.add_argument("--path", help="state.sqlite to import from")
     actions.add_parser("signals", help="Show recent signals and their triage")
+    nxt = actions.add_parser("next", help="Launch the next notice now, ignoring quiet hours")
+    nxt.add_argument("--dry-run", action="store_true", help="Only preview the next notice without sending it")
 
 
 def _print(value: Any) -> None:
@@ -66,7 +68,7 @@ def _print(value: Any) -> None:
 def command(ctx, args: argparse.Namespace) -> int:
     action = getattr(args, "radar_action", None)
     if not action:
-        print("Usage: hermes radar {status|validate|run-once|discover|setup|sync|replay|tasks|task|explain|gmail|import|signals}")
+        print("Usage: hermes radar {status|validate|run-once|discover|setup|sync|replay|tasks|task|explain|gmail|import|signals|next}")
         return 2
     try:
         if action == "discover":
@@ -154,6 +156,15 @@ def command(ctx, args: argparse.Namespace) -> int:
             return 0
         if action == "signals":
             _print([{k: v for k, v in s.items() if k not in {"raw_content", "meta", "extract"}} for s in store.list_signals(limit=30)])
+            return 0
+        if action == "next":
+            from .delivery.preview import deliver_next, preview_next
+
+            now_dt = datetime.now(timezone.utc)
+            if getattr(args, "dry_run", False):
+                _print(preview_next(store, cfg, now_dt))
+            else:
+                _print(deliver_next(store, cfg, now_dt))
             return 0
         if action == "github":
             if getattr(args, "github_action", None) == "route":

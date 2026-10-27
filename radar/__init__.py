@@ -544,7 +544,7 @@ def register(ctx):
     if callable(register_command):
         # ``/radar`` is a built-in alias of ``/loop`` in Hermes, so the in-session command is ``/radar``.
         register_command("radar", lambda raw_args="", **kw: command(ctx, raw_args, **kw),
-                         description="Radar tasks: status | list | prefs | forget <id> | pause | resume | mute <id> | trust <level>", args_hint="<subcommand>")
+                         description="Radar tasks: status | list | next | prefs | forget <id> | pause | resume | mute <id> | trust <level>", args_hint="<subcommand>")
     register_aux_tasks(ctx)
     from .cli import command as cli_command, setup_cli
     ctx.register_cli_command(
