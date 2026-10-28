@@ -443,37 +443,6 @@ async def on_gateway_event(ctx, event=None, **kwargs):
         return None
 
 
-def pending_context(ctx, **kwargs):
-    try:
-        cfg = _enabled(ctx)
-        if cfg is None or str(kwargs.get("platform") or "") in {"cron", "webhook"}:
-            return None
-        store = _store(ctx)
-        from .trust import needs_consent
-
-        lines = ["[radar] Pending decisions the owner may be referring to (resolve them with the radar_resolve tool):"]
-        for proposal in store.list_proposals(statuses=("pending", "sent"), limit=60, newest=True):
-            task = None
-            if proposal.get("task_id"):
-                try:
-                    task = store.get_task(proposal["task_id"])
-                except KeyError:
-                    task = None
-            if not needs_consent(cfg, task, proposal):
-                continue  # the assistant's own queued work is not something the owner answers
-            task_title = (task or {}).get("title", "")
-            lines.append(f"- {proposal['id']}: {proposal.get('title', '')}" + (f" (task: {task_title})" if task_title else ""))
-            if len(lines) > 8:
-                break
-        if len(lines) == 1:
-            return None
-        text = "\n".join(lines)
-        return {"context": text[:1500]}
-    except Exception as exc:
-        log.debug("radar context skipped: %s", exc)
-        return None
-
-
 def command(ctx, raw_args: str = "", **kwargs) -> str:
     try:
         cfg = _enabled(ctx)
@@ -537,7 +506,10 @@ def register(ctx):
     ctx.register_hook("post_llm_call", lambda **kw: capture_turn(ctx, **kw))
     ctx.register_hook("subagent_stop", lambda **kw: capture_subagent(ctx, **kw))
     ctx.register_hook("pre_gateway_dispatch", lambda **kw: on_gateway_event(ctx, **kw))
-    ctx.register_hook("pre_llm_call", lambda **kw: pending_context(ctx, **kw))
+    # No pre_llm_call hook: Radar used to inject its open decisions into every interactive turn so the
+    # assistant could resolve "sí"/"fusiónalo" against them, but that dragged the backlog into every
+    # unrelated turn. The owner resolves decisions through the buttons or by asking; the chat agent can
+    # still look them up on demand with radar_list / radar_resolve.
     ctx.register_hook("pre_tool_call", lambda **kw: guard_tool_call(**kw))  # inert outside a job child
     ctx.register_platform_handler("telegram", telegram_factory(ctx))
     register_command = getattr(ctx, "register_command", None)
